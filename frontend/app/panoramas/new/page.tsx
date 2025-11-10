@@ -48,7 +48,7 @@ export default function NewPanoramaPage() {
   return (
     <main className="mx-auto max-w-2xl p-6">
       <div className="mb-4">
-        <Link className="underline text-sm" href="/panoramas">Back</Link>
+        <Link className="underline text-sm" href="/">Back</Link>
       </div>
       <h1 className="text-2xl font-semibold mb-4">New Panorama</h1>
       <form onSubmit={onCreate} className="space-y-4">

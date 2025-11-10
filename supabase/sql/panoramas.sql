@@ -50,6 +50,14 @@ BEGIN
     CREATE POLICY "Panoramas: owner delete" ON public.panoramas
       FOR DELETE USING (auth.uid() = owner_id);
   END IF;
+
+  -- Allow public to read active panoramas (for response form)
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies WHERE schemaname='public' AND tablename='panoramas' AND policyname='Panoramas: public select active'
+  ) THEN
+    CREATE POLICY "Panoramas: public select active" ON public.panoramas
+      FOR SELECT USING (status = 'active' AND deleted_at IS NULL);
+  END IF;
 END
 $$;
 
