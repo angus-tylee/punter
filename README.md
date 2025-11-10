@@ -81,6 +81,29 @@ To test:
 3) You’ll be redirected to `/account` after signing in
 4) Use “Sign out” in header to log out
 
+## 👤 Profiles
+
+- Table: `public.profiles` keyed to `auth.users(id)` with fields: `display_name`, `avatar_url`, `updated_at`.
+- RLS enabled; users can select/insert/update only their own row.
+- SQL file to run: `supabase/sql/profiles.sql` (open Supabase → SQL Editor → paste/run).
+- `/account` page:
+  - Loads the current user's profile
+  - Creates a row on first visit if missing
+  - Lets the user change `display_name`
+
+## 📦 Panoramas (Core Entity)
+
+- SQL file: `supabase/sql/panoramas.sql` (run in Supabase SQL Editor)
+  - Fields: `name`, `description`, `status` (draft/active/archived), `owner_id`, soft delete via `deleted_at`
+  - RLS: owner-only read/write
+- Pages:
+  - `/panoramas` — list your panoramas
+  - `/panoramas/new` — create new panorama
+  - `/panoramas/[id]` — view/edit, change status, soft delete
+- Notes:
+  - All Supabase calls are client-side; RLS enforces per-user access
+  - Soft delete sets `deleted_at` and list view fetches only rows where `deleted_at is null`
+
 ## 🔍 Virtual Environment Notes
 
 **Why activate venv?**
