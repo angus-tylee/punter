@@ -7,7 +7,7 @@ import { supabase } from "@/lib/supabase";
 type Question = {
   id: string;
   question_text: string;
-  question_type: "text" | "textarea" | "Single-select" | "Multi-select";
+  question_type: "text" | "textarea" | "Single-select" | "Multi-select" | "Likert";
   options: string[] | null;
   required: boolean;
   order: number;
@@ -253,6 +253,25 @@ export default function RespondPage() {
                     </label>
                   );
                 })}
+              </div>
+            )}
+
+            {q.question_type === "Likert" && q.options && (
+              <div className="flex flex-wrap gap-4 items-center">
+                {q.options.map((option, idx) => (
+                  <label key={idx} className="flex flex-col items-center gap-1 cursor-pointer">
+                    <input
+                      type="radio"
+                      name={`question-${q.id}`}
+                      value={option}
+                      checked={(responses[q.id] as string) === option}
+                      onChange={(e) => handleResponseChange(q.id, e.target.value)}
+                      className="rounded"
+                      required={q.required}
+                    />
+                    <span className="text-xs text-center max-w-[100px]">{option}</span>
+                  </label>
+                ))}
               </div>
             )}
           </div>

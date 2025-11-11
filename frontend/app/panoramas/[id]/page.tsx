@@ -16,7 +16,7 @@ type Panorama = {
 type Question = {
   id: string;
   question_text: string;
-  question_type: "text" | "textarea" | "Single-select" | "Multi-select";
+  question_type: "text" | "textarea" | "Single-select" | "Multi-select" | "Likert";
   options: string[] | null;
   required: boolean;
   order: number;
@@ -40,7 +40,7 @@ export default function PanoramaDetailPage() {
   const [showQuestionForm, setShowQuestionForm] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [questionText, setQuestionText] = useState("");
-  const [questionType, setQuestionType] = useState<"text" | "textarea" | "Single-select" | "Multi-select">("text");
+  const [questionType, setQuestionType] = useState<"text" | "textarea" | "Single-select" | "Multi-select" | "Likert">("text");
   const [questionOptions, setQuestionOptions] = useState("");
   const [questionRequired, setQuestionRequired] = useState(false);
   const [savingQuestion, setSavingQuestion] = useState(false);
@@ -173,9 +173,18 @@ export default function PanoramaDetailPage() {
   const onSaveQuestion = async (e: React.FormEvent) => {
     e.preventDefault();
     setSavingQuestion(true);
-    const options = (questionType === "Single-select" || questionType === "Multi-select") && questionOptions.trim()
-      ? questionOptions.split("\n").map(o => o.trim()).filter(o => o)
-      : null;
+    let options: string[] | null = null;
+    if (questionType === "Single-select" || questionType === "Multi-select") {
+      options = questionOptions.trim()
+        ? questionOptions.split("\n").map(o => o.trim()).filter(o => o)
+        : null;
+    } else if (questionType === "Likert") {
+      // Use standard 5-point Likert scale if no options provided
+      const likertScale = ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"];
+      options = questionOptions.trim()
+        ? questionOptions.split("\n").map(o => o.trim()).filter(o => o)
+        : likertScale;
+    }
 
     if (editingQuestion) {
       const { error } = await supabase
@@ -363,24 +372,35 @@ export default function PanoramaDetailPage() {
               <label className="block text-sm mb-1">Type</label>
               <select
                 value={questionType}
-                onChange={(e) => setQuestionType(e.target.value as any)}
+                onChange={(e) => {
+                  const newType = e.target.value as any;
+                  setQuestionType(newType);
+                  // Auto-populate Likert scale when selected
+                  if (newType === "Likert" && !questionOptions.trim()) {
+                    setQuestionOptions("Strongly Disagree\nDisagree\nNeutral\nAgree\nStrongly Agree");
+                  }
+                }}
                 className="rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2"
               >
                 <option value="text">Text</option>
                 <option value="textarea">Textarea</option>
                 <option value="Single-select">Single-select</option>
                 <option value="Multi-select">Multi-select</option>
+                <option value="Likert">Likert Scale</option>
               </select>
             </div>
-            {(questionType === "Single-select" || questionType === "Multi-select") && (
+            {(questionType === "Single-select" || questionType === "Multi-select" || questionType === "Likert") && (
               <div>
-                <label className="block text-sm mb-1">Options (one per line)</label>
+                <label className="block text-sm mb-1">
+                  Options (one per line)
+                  {questionType === "Likert" && <span className="text-xs text-gray-500 ml-2">(Standard 5-point scale will be used if empty)</span>}
+                </label>
                 <textarea
                   value={questionOptions}
                   onChange={(e) => setQuestionOptions(e.target.value)}
                   className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 outline-none min-h-[80px]"
-                  placeholder="Option 1&#10;Option 2&#10;Option 3"
-                  required
+                  placeholder={questionType === "Likert" ? "Strongly Disagree\nDisagree\nNeutral\nAgree\nStrongly Agree" : "Option 1&#10;Option 2&#10;Option 3"}
+                  required={questionType !== "Likert"}
                 />
               </div>
             )}

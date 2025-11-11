@@ -5,7 +5,7 @@ create table if not exists public.questions (
   id uuid primary key default gen_random_uuid(),
   panorama_id uuid not null references public.panoramas(id) on delete cascade,
   question_text text not null,
-  question_type text not null check (question_type in ('text', 'textarea', 'Single-select', 'Multi-select')),
+  question_type text not null check (question_type in ('text', 'textarea', 'Single-select', 'Multi-select', 'Likert')),
   options jsonb null,
   required boolean not null default false,
   "order" integer not null default 0,
@@ -100,6 +100,35 @@ BEGIN
     FOR EACH ROW
     EXECUTE FUNCTION public.set_updated_at();
   END IF;
+END
+$$;
+
+-- Migration: Add Likert to question_type constraint (if table already exists)
+-- Run this in Supabase SQL Editor to update existing tables
+DO $$
+DECLARE
+  constraint_name text;
+BEGIN
+  -- Find the actual constraint name
+  SELECT conname INTO constraint_name
+  FROM pg_constraint
+  WHERE conrelid = 'public.questions'::regclass
+    AND contype = 'c'
+    AND pg_get_constraintdef(oid) LIKE '%question_type%'
+  LIMIT 1;
+  
+  -- If we found a constraint, drop it
+  IF constraint_name IS NOT NULL THEN
+    EXECUTE format('ALTER TABLE public.questions DROP CONSTRAINT %I', constraint_name);
+  END IF;
+  
+  -- Add the new constraint with Likert included
+  ALTER TABLE public.questions ADD CONSTRAINT questions_question_type_check 
+    CHECK (question_type IN ('text', 'textarea', 'Single-select', 'Multi-select', 'Likert'));
+EXCEPTION
+  WHEN duplicate_object THEN
+    -- Constraint already exists, ignore
+    NULL;
 END
 $$;
 

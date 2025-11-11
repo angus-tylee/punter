@@ -31,20 +31,20 @@ export default function NewPanoramaPage() {
   const [additionalContext, setAdditionalContext] = useState("");
 
   const goalOptions = [
-    "Gather feedback",
-    "Measure satisfaction",
-    "Understand preferences",
+    "Measure attendee satisfaction",
+    "Improve lineup selection",
+    "Enhance venue experience",
+    "Gather detailed feedback",
+    "Understand attendee preferences",
     "Collect testimonials",
     "Other"
   ];
 
   const eventTypeOptions = [
-    "Conference",
-    "Workshop",
-    "Wedding",
-    "Corporate Event",
-    "Festival",
-    "Other"
+    "Music Festival",
+    "Venue Event",
+    "Concert",
+    "Live Music Event"
   ];
 
   const handleGoalToggle = (goal: string) => {
@@ -142,7 +142,7 @@ export default function NewPanoramaPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-semibold mb-2">Create Your Survey</h1>
         <p className="text-sm text-gray-600 dark:text-gray-400">
-          Answer a few questions and we'll generate a custom survey for your event
+          Tell us about your venue or music festival and we'll generate a comprehensive 25-question survey
         </p>
       </div>
 
@@ -207,7 +207,7 @@ export default function NewPanoramaPage() {
                 value={eventName}
                 onChange={(e) => setEventName(e.target.value)}
                 className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 outline-none"
-                placeholder="e.g., Annual Tech Conference 2024"
+                placeholder="e.g., Summer Music Festival 2024"
                 required
               />
             </div>
@@ -238,7 +238,7 @@ export default function NewPanoramaPage() {
                 value={learningObjectives}
                 onChange={(e) => setLearningObjectives(e.target.value)}
                 className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 outline-none min-h-[120px]"
-                placeholder="e.g., What sessions were most valuable? How can we improve next year?"
+                placeholder="e.g., How can we improve the lineup? What did attendees think of the venue? How was the sound quality?"
                 required
               />
             </div>
@@ -254,7 +254,7 @@ export default function NewPanoramaPage() {
                 value={audience}
                 onChange={(e) => setAudience(e.target.value)}
             className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 outline-none"
-                placeholder="e.g., Tech professionals, Wedding guests, Workshop attendees"
+                placeholder="e.g., Music festival attendees, Concert-goers, Live music fans"
                 required
           />
         </div>
@@ -328,7 +328,7 @@ export default function NewPanoramaPage() {
       {loading && (
         <div className="mt-6 p-4 rounded-md bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800">
           <p className="text-sm text-gray-600 dark:text-gray-400 text-center">
-            Generating your survey... This usually takes 10-15 seconds.
+            Generating your comprehensive 25-question survey... This usually takes 15-20 seconds.
           </p>
         </div>
       )}
