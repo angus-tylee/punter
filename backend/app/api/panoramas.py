@@ -20,10 +20,20 @@ class PanoramaContext(BaseModel):
     additional_context: Optional[str] = None
 
 
+class StagingQuestion(BaseModel):
+    """Question structure for staging"""
+    question_text: str
+    question_type: str
+    options: Optional[List[str]] = None
+    required: bool = False
+    order: int = 0
+
+
 class PanoramaGenerateResponse(BaseModel):
     """Response from panorama generation"""
     panorama_id: str
     questions_count: int
+    questions: List[StagingQuestion]
 
 
 def get_supabase_client() -> Client:
@@ -103,32 +113,22 @@ async def generate_panorama_from_context(
         
         panorama_id = panorama_result.data[0]["id"]
         
-        # Create questions
-        questions_data = []
-        for q in questions:
-            question_data = {
-                "panorama_id": panorama_id,
-                "question_text": q["question_text"],
-                "question_type": q["question_type"],
-                "options": q.get("options"),
-                "required": q.get("required", False),
-                "order": q.get("order", len(questions_data))
-            }
-            questions_data.append(question_data)
-        
-        if questions_data:
-            try:
-                supabase.table("questions").insert(questions_data).execute()
-            except Exception as e:
-                print(f"Questions creation error: {e}")
-                import traceback
-                traceback.print_exc()
-                # Panorama was created, so we should still return success but log the error
-                print(f"Warning: Panorama {panorama_id} created but questions failed to insert")
+        # Prepare questions for staging (DO NOT save to database yet)
+        staging_questions = []
+        for i, q in enumerate(questions):
+            staging_question = StagingQuestion(
+                question_text=q["question_text"],
+                question_type=q["question_type"],
+                options=q.get("options"),
+                required=q.get("required", False),
+                order=q.get("order", i)
+            )
+            staging_questions.append(staging_question)
         
         return PanoramaGenerateResponse(
             panorama_id=panorama_id,
-            questions_count=len(questions)
+            questions_count=len(questions),
+            questions=staging_questions
         )
         
     except HTTPException:
@@ -140,4 +140,62 @@ async def generate_panorama_from_context(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to generate panorama: {str(e)}")
+
+
+class SaveQuestionsRequest(BaseModel):
+    """Request to save questions to panorama"""
+    questions: List[StagingQuestion]
+
+
+@router.post("/panoramas/{panorama_id}/save-questions")
+async def save_questions(
+    panorama_id: str,
+    request: SaveQuestionsRequest
+):
+    """
+    Save questions to a panorama after staging review.
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        # Verify panorama exists and user has access
+        panorama_result = supabase.table("panoramas").select("id, owner_id").eq("id", panorama_id).execute()
+        
+        if not panorama_result.data or len(panorama_result.data) == 0:
+            raise HTTPException(status_code=404, detail="Panorama not found")
+        
+        # Prepare questions data
+        questions_data = []
+        for q in request.questions:
+            question_data = {
+                "panorama_id": panorama_id,
+                "question_text": q.question_text,
+                "question_type": q.question_type,
+                "options": q.options,
+                "required": q.required,
+                "order": q.order
+            }
+            questions_data.append(question_data)
+        
+        if not questions_data:
+            raise HTTPException(status_code=400, detail="No questions provided")
+        
+        # Insert questions
+        try:
+            supabase.table("questions").insert(questions_data).execute()
+        except Exception as e:
+            print(f"Questions creation error: {e}")
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"Failed to save questions: {str(e)}")
+        
+        return {"success": True, "questions_saved": len(questions_data)}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Unexpected error saving questions: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to save questions: {str(e)}")
 

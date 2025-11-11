@@ -125,8 +125,9 @@ export default function NewPanoramaPage() {
 
       const data = await response.json();
       
-      // Redirect to panorama detail page
-      router.push(`/panoramas/${data.panorama_id}`);
+      // Redirect to staging page with questions data
+      const questionsParam = encodeURIComponent(JSON.stringify(data.questions));
+      router.push(`/panoramas/${data.panorama_id}/stage?questions=${questionsParam}`);
     } catch (err: any) {
       setError(err.message || "Failed to generate survey. Please try again.");
       setLoading(false);
