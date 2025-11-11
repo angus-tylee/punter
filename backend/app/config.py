@@ -10,6 +10,9 @@ class Settings(BaseSettings):
     supabase_key: Optional[str] = None
     database_url: Optional[str] = None
     
+    # LLM configuration
+    openai_api_key: Optional[str] = None
+    
     # API configuration
     api_host: str = "0.0.0.0"
     api_port: int = 8000

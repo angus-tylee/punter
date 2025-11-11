@@ -65,7 +65,7 @@ export default function Home() {
                   <div className="text-xs text-gray-500">Status: {p.status} • Updated: {new Date(p.updated_at).toLocaleString()}</div>
                 </div>
                 <Link className="underline text-sm" href={`/panoramas/${p.id}`}>Open</Link>
-              </div>
+      </div>
             </li>
           ))}
         </ul>
