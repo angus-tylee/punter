@@ -5,7 +5,7 @@ create table if not exists public.questions (
   id uuid primary key default gen_random_uuid(),
   panorama_id uuid not null references public.panoramas(id) on delete cascade,
   question_text text not null,
-  question_type text not null check (question_type in ('text', 'textarea', 'Single-select', 'Multi-select', 'Likert')),
+  question_type text not null check (question_type in ('text', 'textarea', 'Single-select', 'Multi-select', 'Likert', 'budget-allocation')),
   options jsonb null,
   required boolean not null default false,
   "order" integer not null default 0,
@@ -122,9 +122,9 @@ BEGIN
     EXECUTE format('ALTER TABLE public.questions DROP CONSTRAINT %I', constraint_name);
   END IF;
   
-  -- Add the new constraint with Likert included
+  -- Add the new constraint with Likert and budget-allocation included
   ALTER TABLE public.questions ADD CONSTRAINT questions_question_type_check 
-    CHECK (question_type IN ('text', 'textarea', 'Single-select', 'Multi-select', 'Likert'));
+    CHECK (question_type IN ('text', 'textarea', 'Single-select', 'Multi-select', 'Likert', 'budget-allocation'));
 EXCEPTION
   WHEN duplicate_object THEN
     -- Constraint already exists, ignore

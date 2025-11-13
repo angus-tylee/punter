@@ -4,16 +4,15 @@ import { useEffect, useState, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend } from "recharts";
-
-type Question = {
-  id: string;
-  question_text: string;
-  question_type: "text" | "textarea" | "Single-select" | "Multi-select" | "Likert";
-  options: string[] | null;
-  required: boolean;
-  order: number;
-};
+import { aggregateAll, Question, Response as AnalyticsResponse, OverallStats } from "@/lib/analytics/aggregators";
+import { generateInsight } from "@/lib/analytics/insightsGenerator";
+import { generateDashboardConfig } from "@/lib/analytics/dashboardConfig";
+import { analyzeWordFrequency } from "@/lib/analytics/textAnalyzer";
+import ExecutiveSummary from "@/components/analytics/ExecutiveSummary";
+import KeyMetrics from "@/components/analytics/KeyMetrics";
+import QuickWins from "@/components/analytics/QuickWins";
+import QuestionInsight from "@/components/analytics/QuestionInsight";
+import WordCloud from "@/components/analytics/WordCloud";
 
 type Response = {
   id: string;
@@ -37,6 +36,7 @@ export default function ResponsesPage() {
   const id = params?.id as string;
 
   const [panoramaName, setPanoramaName] = useState("");
+  const [panoramaDescription, setPanoramaDescription] = useState("");
   const [questions, setQuestions] = useState<Question[]>([]);
   const [responses, setResponses] = useState<Response[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,14 +52,15 @@ export default function ResponsesPage() {
         return;
       }
 
-      // Load panorama name
+      // Load panorama data
       const { data: panoramaData } = await supabase
         .from("panoramas")
-        .select("name")
+        .select("name, description")
         .eq("id", id)
         .maybeSingle();
       if (panoramaData) {
         setPanoramaName(panoramaData.name);
+        setPanoramaDescription(panoramaData.description || "");
       }
 
       // Load questions
@@ -93,46 +94,64 @@ export default function ResponsesPage() {
     };
   }, [id, router]);
 
-  // Summary statistics
-  const summaryStats = useMemo(() => {
+  // Compute analytics
+  const analytics = useMemo(() => {
+    if (questions.length === 0 || responses.length === 0) {
+      return null;
+    }
+
+    // Aggregate all data
+    const { stats, overall } = aggregateAll(questions, responses);
+
+    // Generate insights for each question
+    const insights: { [questionId: string]: ReturnType<typeof generateInsight> } = {};
     const uniqueSubmissions = new Set(responses.map(r => r.submission_id));
+    
+    questions.forEach(question => {
+      const aggregated = stats[question.id];
+      if (aggregated) {
+        insights[question.id] = generateInsight(
+          question,
+          aggregated,
+          uniqueSubmissions.size
+        );
+      }
+    });
+
+    // Generate dashboard config
+    const dashboardConfig = generateDashboardConfig(
+      questions,
+      stats,
+      insights,
+      overall,
+      uniqueSubmissions.size
+    );
+
+    // Sample text responses for LLM (max 30 per question)
+    const textSamples: { [questionId: string]: string[] } = {};
+    questions.forEach(question => {
+      if (question.question_type === "text" || question.question_type === "textarea") {
+        const questionResponses = responses
+          .filter(r => r.question_id === question.id)
+          .slice(0, 30)
+          .map(r => r.response_text);
+        if (questionResponses.length > 0) {
+          textSamples[question.id] = questionResponses;
+        }
+      }
+    });
+
     return {
-      totalResponses: responses.length,
-      uniqueSubmissions: uniqueSubmissions.size,
+      stats,
+      overall,
+      insights,
+      dashboardConfig,
+      textSamples,
+      uniqueSubmissions: uniqueSubmissions.size
     };
-  }, [responses]);
+  }, [questions, responses]);
 
-  // Aggregate single-select responses
-  const aggregateSingleSelect = (question: Question) => {
-    const questionResponses = responses.filter(r => r.question_id === question.id);
-    const counts: { [key: string]: number } = {};
-    
-    questionResponses.forEach(r => {
-      counts[r.response_text] = (counts[r.response_text] || 0) + 1;
-    });
-
-    return question.options?.map(option => ({
-      name: option,
-      value: counts[option] || 0,
-    })) || [];
-  };
-
-  // Aggregate multi-select responses
-  const aggregateMultiSelect = (question: Question) => {
-    const questionResponses = responses.filter(r => r.question_id === question.id);
-    const counts: { [key: string]: number } = {};
-    
-    questionResponses.forEach(r => {
-      counts[r.response_text] = (counts[r.response_text] || 0) + 1;
-    });
-
-    return question.options?.map(option => ({
-      name: option,
-      value: counts[option] || 0,
-    })) || [];
-  };
-
-  // Get responses by question for insights
+  // Get responses by question for responses tab
   const getResponsesByQuestion = () => {
     const questionMap: { [key: string]: { question: Question; responses: Response[] } } = {};
     questions.forEach((q) => {
@@ -212,111 +231,91 @@ export default function ResponsesPage() {
       </div>
 
       {activeTab === "insights" ? (
-        <div className="space-y-6">
-          {/* Summary Statistics */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="rounded border border-gray-200 dark:border-gray-800 p-4">
-              <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">Total Responses</div>
-              <div className="text-2xl font-semibold">{summaryStats.totalResponses}</div>
-            </div>
-            <div className="rounded border border-gray-200 dark:border-gray-800 p-4">
-              <div className="text-sm text-gray-500 dark:text-gray-400 mb-1">Unique Submissions</div>
-              <div className="text-2xl font-semibold">{summaryStats.uniqueSubmissions}</div>
-            </div>
-          </div>
-
+        <div className="space-y-8">
           {responses.length === 0 ? (
-            <p className="text-sm text-gray-500">No responses yet. Charts will appear here once responses are collected.</p>
-          ) : (
-            <div className="space-y-6">
-              {getResponsesByQuestion().map(({ question, responses: questionResponses }) => (
-                <div key={question.id} className="rounded border border-gray-200 dark:border-gray-800 p-4">
-                  <div className="font-medium mb-4">
-                    {question.question_text}
-                    <span className="text-xs text-gray-500 ml-2 font-normal">
-                      ({questionResponses.length} {questionResponses.length === 1 ? "response" : "responses"})
-                    </span>
-                  </div>
+            <div className="text-center py-12">
+              <p className="text-gray-500 dark:text-gray-400">
+                No responses yet. The analytics dashboard will appear here once responses are collected.
+              </p>
+            </div>
+          ) : analytics ? (
+            <>
+              {/* Executive Summary */}
+              <ExecutiveSummary
+                panoramaId={id}
+                panoramaName={panoramaName}
+                summaryRequest={{
+                  panorama: {
+                    name: panoramaName,
+                    description: panoramaDescription,
+                  },
+                  questions: questions.map(q => ({
+                    id: q.id,
+                    question_text: q.question_text,
+                    question_type: q.question_type,
+                  })),
+                  aggregated_stats: {
+                    overall_satisfaction: analytics.overall.overall_satisfaction,
+                    top_positive_question: analytics.overall.top_positive_question,
+                    top_negative_question: analytics.overall.top_negative_question,
+                  },
+                  text_samples: analytics.textSamples,
+                  response_count: analytics.overall.total_responses,
+                }}
+              />
 
-                  {(question.question_type === "Single-select" || question.question_type === "Likert") && question.options && (
-                    <div className="mt-4">
-                      {question.question_type === "Likert" ? (
-                        <ResponsiveContainer width="100%" height={300}>
-                          <BarChart data={aggregateSingleSelect(question)}>
-                            <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="name" angle={-45} textAnchor="end" height={100} />
-                            <YAxis />
-                            <Tooltip />
-                            <Bar dataKey="value" fill="#8884d8" />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      ) : (
-                        <ResponsiveContainer width="100%" height={300}>
-                          <PieChart>
-                            <Pie
-                              data={aggregateSingleSelect(question)}
-                              cx="50%"
-                              cy="50%"
-                              labelLine={false}
-                              label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
-                              outerRadius={80}
-                              fill="#8884d8"
-                              dataKey="value"
-                            >
-                              {aggregateSingleSelect(question).map((entry, index) => (
-                                <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                              ))}
-                            </Pie>
-                            <Tooltip />
-                            <Legend />
-                          </PieChart>
-                        </ResponsiveContainer>
-                      )}
-                    </div>
-                  )}
+              {/* Key Metrics */}
+              <KeyMetrics overall={analytics.overall} />
 
-                  {question.question_type === "Multi-select" && question.options && (
-                    <div className="mt-4">
-                      <ResponsiveContainer width="100%" height={300}>
-                        <BarChart data={aggregateMultiSelect(question)}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="name" angle={-45} textAnchor="end" height={100} />
-                          <YAxis />
-                          <Tooltip />
-                          <Bar dataKey="value" fill="#8884d8" />
-                        </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  )}
+              {/* Quick Wins */}
+              <QuickWins
+                positives={analytics.dashboardConfig.quickWins.positives}
+                negatives={analytics.dashboardConfig.quickWins.negatives}
+              />
 
-                  {(question.question_type === "text" || question.question_type === "textarea") && (
-                    <div className="mt-4 space-y-2">
-                      <div className="text-sm text-gray-500 mb-2">Top Responses:</div>
-                      {questionResponses.slice(0, 5).map((r) => (
-                        <div key={r.id} className="text-sm pl-4 border-l-2 border-gray-200 dark:border-gray-700">
-                          {r.response_text}
-                        </div>
-                      ))}
-                      {questionResponses.length > 5 && (
-                        <div className="text-xs text-gray-500 mt-2">
-                          ... and {questionResponses.length - 5} more responses
-                        </div>
-                      )}
-                      {/* Fake word frequency for MVP */}
-                      <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-800">
-                        <div className="text-sm text-gray-500 mb-2">Word Frequency (Sample):</div>
-                        <div className="flex flex-wrap gap-2">
-                          {["excellent", "good", "satisfactory", "needs improvement"].map((word, idx) => (
-                            <span key={idx} className="text-xs px-2 py-1 rounded bg-gray-100 dark:bg-gray-800">
-                              {word} ({Math.floor(Math.random() * 20) + 5})
-                            </span>
-                          ))}
-                        </div>
+              {/* Question Insights (Priority Ordered) */}
+              <div className="space-y-6">
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+                  Detailed Insights
+                </h2>
+                {analytics.dashboardConfig.questions.map(({ question, aggregated, insight }) => {
+                  // For text questions, add word cloud
+                  if (
+                    (question.question_type === "text" ||
+                      question.question_type === "textarea") &&
+                    aggregated.total > 0
+                  ) {
+                    const textResponses = responses
+                      .filter(r => r.question_id === question.id)
+                      .map(r => r.response_text);
+                    const wordAnalysis = analyzeWordFrequency(textResponses);
+
+                    return (
+                      <div key={question.id} className="space-y-4">
+                        <QuestionInsight
+                          question={question}
+                          aggregated={aggregated}
+                          insight={insight}
+                        />
+                        <WordCloud wordFrequencies={wordAnalysis.wordFrequencies} />
                       </div>
-                    </div>
-                  )}
-                </div>
-              ))}
+                    );
+                  }
+
+                  return (
+                    <QuestionInsight
+                      key={question.id}
+                      question={question}
+                      aggregated={aggregated}
+                      insight={insight}
+                    />
+                  );
+                })}
+              </div>
+            </>
+          ) : (
+            <div className="text-center py-12">
+              <p className="text-gray-500 dark:text-gray-400">Loading analytics...</p>
             </div>
           )}
         </div>
@@ -349,12 +348,36 @@ export default function ResponsesPage() {
                     Submitted: {new Date(group.created_at).toLocaleString()}
                   </div>
                   <div className="space-y-2">
-                    {group.responses.map((r) => (
-                      <div key={r.id} className="text-sm">
-                        <span className="font-medium">{getQuestionText(r.question_id)}: </span>
-                        <span>{r.response_text}</span>
-                      </div>
-                    ))}
+                    {group.responses.map((r) => {
+                      const question = questions.find(q => q.id === r.question_id);
+                      let displayText = r.response_text;
+                      
+                      // Format budget allocation responses
+                      if (question?.question_type === "budget-allocation") {
+                        try {
+                          const allocation = JSON.parse(r.response_text) as { [artistId: string]: number };
+                          const budgetOptions = question.options as { budget: number; artists: Array<{ id: string; name: string; imageUrl: string }> } | null;
+                          if (budgetOptions?.artists) {
+                            const artistNames = Object.entries(allocation)
+                              .map(([artistId, amount]) => {
+                                const artist = budgetOptions.artists.find(a => a.id === artistId);
+                                return artist ? `${artist.name}: $${amount}` : null;
+                              })
+                              .filter(Boolean);
+                            displayText = artistNames.join(", ") || r.response_text;
+                          }
+                        } catch (e) {
+                          // Invalid JSON, use raw text
+                        }
+                      }
+                      
+                      return (
+                        <div key={r.id} className="text-sm">
+                          <span className="font-medium">{getQuestionText(r.question_id)}: </span>
+                          <span>{displayText}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               ))}

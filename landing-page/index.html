@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Punter - Coming Soon</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#3b82f6',
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen">
+    <!-- Hero Section -->
+    <div class="container mx-auto px-4 py-16 md:py-24">
+        <div class="max-w-4xl mx-auto text-center">
+            <!-- Logo/Brand -->
+            <h1 class="text-5xl md:text-7xl font-bold text-gray-900 mb-6">
+                Punter
+            </h1>
+            
+            <!-- Tagline -->
+            <p class="text-xl md:text-2xl text-gray-700 mb-8">
+                Coming Soon
+            </p>
+            
+            <!-- Description -->
+            <p class="text-lg md:text-xl text-gray-600 mb-12 max-w-2xl mx-auto">
+                We're building something amazing. Be the first to know when we launch.
+            </p>
+            
+            <!-- Email Signup Form -->
+            <div class="max-w-md mx-auto mb-16">
+                <form id="signup-form" class="flex flex-col sm:flex-row gap-3">
+                    <input 
+                        type="email" 
+                        id="email"
+                        placeholder="Enter your email" 
+                        required
+                        class="flex-1 px-4 py-3 rounded-lg border border-gray-300 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                    <button 
+                        type="submit"
+                        class="px-8 py-3 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 transition-colors"
+                    >
+                        Notify Me
+                    </button>
+                </form>
+                <p id="message" class="mt-3 text-sm text-gray-600"></p>
+            </div>
+            
+            <!-- Features Preview (optional) -->
+            <div class="grid md:grid-cols-3 gap-8 mt-16">
+                <div class="bg-white rounded-lg p-6 shadow-md">
+                    <div class="text-3xl mb-4">🚀</div>
+                    <h3 class="font-semibold text-lg mb-2">Fast</h3>
+                    <p class="text-gray-600">Lightning-fast performance</p>
+                </div>
+                <div class="bg-white rounded-lg p-6 shadow-md">
+                    <div class="text-3xl mb-4">✨</div>
+                    <h3 class="font-semibold text-lg mb-2">Simple</h3>
+                    <p class="text-gray-600">Easy to use interface</p>
+                </div>
+                <div class="bg-white rounded-lg p-6 shadow-md">
+                    <div class="text-3xl mb-4">🔒</div>
+                    <h3 class="font-semibold text-lg mb-2">Secure</h3>
+                    <p class="text-gray-600">Your data is protected</p>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Footer -->
+    <footer class="text-center py-8 text-gray-600">
+        <p>&copy; 2024 Punter. All rights reserved.</p>
+    </footer>
+    
+    <script>
+        // Simple form handling (you can replace with your email service later)
+        document.getElementById('signup-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            const messageEl = document.getElementById('message');
+            
+            // For now, just show a success message
+            // Later, you can integrate with:
+            // - Email service (Mailchimp, ConvertKit, etc.)
+            // - Supabase table for email collection
+            // - Your backend API
+            
+            messageEl.textContent = 'Thanks! We\'ll notify you soon.';
+            messageEl.className = 'mt-3 text-sm text-green-600';
+            document.getElementById('email').value = '';
+            
+            // Optional: Send to your backend
+            // await fetch('https://your-api.com/signup', {
+            //     method: 'POST',
+            //     headers: { 'Content-Type': 'application/json' },
+            //     body: JSON.stringify({ email })
+            // });
+        });
+    </script>
+</body>
+</html>
+

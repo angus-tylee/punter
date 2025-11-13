@@ -1,8 +1,8 @@
 export type StagingQuestion = {
   id?: string; // Temporary ID for staging
   question_text: string;
-  question_type: "text" | "textarea" | "Single-select" | "Multi-select" | "Likert";
-  options: string[] | null;
+  question_type: "text" | "textarea" | "Single-select" | "Multi-select" | "Likert" | "budget-allocation";
+  options: string[] | any | null;
   required: boolean;
   order: number;
   category?: string; // Inferred category

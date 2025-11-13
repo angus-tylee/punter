@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Union
 from supabase import create_client, Client
 from app.config import settings
 from app.services.llm_service import LLMService
@@ -24,7 +24,7 @@ class StagingQuestion(BaseModel):
     """Question structure for staging"""
     question_text: str
     question_type: str
-    options: Optional[List[str]] = None
+    options: Optional[Union[List[str], dict]] = None  # Can be list of strings or dict for budget-allocation
     required: bool = False
     order: int = 0
 

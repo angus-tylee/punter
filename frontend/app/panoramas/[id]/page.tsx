@@ -16,8 +16,8 @@ type Panorama = {
 type Question = {
   id: string;
   question_text: string;
-  question_type: "text" | "textarea" | "Single-select" | "Multi-select" | "Likert";
-  options: string[] | null;
+  question_type: "text" | "textarea" | "Single-select" | "Multi-select" | "Likert" | "budget-allocation";
+  options: string[] | any | null;
   required: boolean;
   order: number;
 };
@@ -40,10 +40,12 @@ export default function PanoramaDetailPage() {
   const [showQuestionForm, setShowQuestionForm] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [questionText, setQuestionText] = useState("");
-  const [questionType, setQuestionType] = useState<"text" | "textarea" | "Single-select" | "Multi-select" | "Likert">("text");
+  const [questionType, setQuestionType] = useState<"text" | "textarea" | "Single-select" | "Multi-select" | "Likert" | "budget-allocation">("text");
   const [questionOptions, setQuestionOptions] = useState("");
   const [questionRequired, setQuestionRequired] = useState(false);
   const [savingQuestion, setSavingQuestion] = useState(false);
+  const [budgetAmount, setBudgetAmount] = useState(100);
+  const [artists, setArtists] = useState<Array<{ id: string; name: string; imageUrl: string }>>([]);
 
   useEffect(() => {
     let mounted = true;
@@ -156,7 +158,16 @@ export default function PanoramaDetailPage() {
     setEditingQuestion(q);
     setQuestionText(q.question_text);
     setQuestionType(q.question_type);
-    setQuestionOptions(q.options ? q.options.join("\n") : "");
+    if (q.question_type === "budget-allocation" && q.options && typeof q.options === "object" && !Array.isArray(q.options)) {
+      const budgetOptions = q.options as { budget: number; artists: Array<{ id: string; name: string; imageUrl: string }> };
+      setBudgetAmount(budgetOptions.budget || 100);
+      setArtists(budgetOptions.artists || []);
+      setQuestionOptions("");
+    } else {
+      setQuestionOptions(q.options && Array.isArray(q.options) ? q.options.join("\n") : "");
+      setBudgetAmount(100);
+      setArtists([]);
+    }
     setQuestionRequired(q.required);
     setShowQuestionForm(true);
   };
@@ -168,12 +179,14 @@ export default function PanoramaDetailPage() {
     setQuestionType("text");
     setQuestionOptions("");
     setQuestionRequired(false);
+    setBudgetAmount(100);
+    setArtists([]);
   };
 
   const onSaveQuestion = async (e: React.FormEvent) => {
     e.preventDefault();
     setSavingQuestion(true);
-    let options: string[] | null = null;
+    let options: string[] | any | null = null;
     if (questionType === "Single-select" || questionType === "Multi-select") {
       options = questionOptions.trim()
         ? questionOptions.split("\n").map(o => o.trim()).filter(o => o)
@@ -184,6 +197,12 @@ export default function PanoramaDetailPage() {
       options = questionOptions.trim()
         ? questionOptions.split("\n").map(o => o.trim()).filter(o => o)
         : likertScale;
+    } else if (questionType === "budget-allocation") {
+      // Store budget allocation config as JSON
+      options = {
+        budget: budgetAmount,
+        artists: artists,
+      };
     }
 
     if (editingQuestion) {
@@ -387,6 +406,7 @@ export default function PanoramaDetailPage() {
                 <option value="Single-select">Single-select</option>
                 <option value="Multi-select">Multi-select</option>
                 <option value="Likert">Likert Scale</option>
+                <option value="budget-allocation">Budget Allocation</option>
               </select>
             </div>
             {(questionType === "Single-select" || questionType === "Multi-select" || questionType === "Likert") && (
@@ -402,6 +422,72 @@ export default function PanoramaDetailPage() {
                   placeholder={questionType === "Likert" ? "Strongly Disagree\nDisagree\nNeutral\nAgree\nStrongly Agree" : "Option 1&#10;Option 2&#10;Option 3"}
                   required={questionType !== "Likert"}
                 />
+              </div>
+            )}
+            {questionType === "budget-allocation" && (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm mb-1">Budget Amount ($)</label>
+                  <input
+                    type="number"
+                    value={budgetAmount}
+                    onChange={(e) => setBudgetAmount(parseInt(e.target.value) || 100)}
+                    min="1"
+                    className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 outline-none"
+                    required
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm mb-2">Artists</label>
+                  <div className="space-y-3">
+                    {artists.map((artist, idx) => (
+                      <div key={artist.id} className="flex items-start gap-2 p-3 border border-gray-200 dark:border-gray-700 rounded-md">
+                        <div className="flex-1 space-y-2">
+                          <input
+                            type="text"
+                            value={artist.name}
+                            onChange={(e) => {
+                              const newArtists = [...artists];
+                              newArtists[idx].name = e.target.value;
+                              setArtists(newArtists);
+                            }}
+                            placeholder="Artist name"
+                            className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 outline-none text-sm"
+                            required
+                          />
+                          <input
+                            type="url"
+                            value={artist.imageUrl}
+                            onChange={(e) => {
+                              const newArtists = [...artists];
+                              newArtists[idx].imageUrl = e.target.value;
+                              setArtists(newArtists);
+                            }}
+                            placeholder="Image URL"
+                            className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 outline-none text-sm"
+                          />
+                          {artist.imageUrl && (
+                            <img src={artist.imageUrl} alt={artist.name} className="w-16 h-16 object-cover rounded" />
+                          )}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setArtists(artists.filter((_, i) => i !== idx))}
+                          className="text-red-500 hover:text-red-700 text-sm"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                    <button
+                      type="button"
+                      onClick={() => setArtists([...artists, { id: crypto.randomUUID(), name: "", imageUrl: "" }])}
+                      className="w-full py-2 border-2 border-dashed border-gray-300 dark:border-gray-700 rounded-md text-sm text-gray-600 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-600"
+                    >
+                      + Add Artist
+                    </button>
+                  </div>
+                </div>
               </div>
             )}
             <div className="flex items-center gap-2">
@@ -450,7 +536,13 @@ export default function PanoramaDetailPage() {
                     </div>
                     {q.options && (
                       <div className="text-xs text-gray-500 mt-1">
-                        Options: {q.options.join(", ")}
+                        {q.question_type === "budget-allocation" ? (
+                          <span>
+                            Budget: ${(q.options as any)?.budget || 0}, Artists: {(q.options as any)?.artists?.length || 0}
+                          </span>
+                        ) : Array.isArray(q.options) ? (
+                          <span>Options: {q.options.join(", ")}</span>
+                        ) : null}
                       </div>
                     )}
                   </div>
