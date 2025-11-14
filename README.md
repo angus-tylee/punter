@@ -31,36 +31,9 @@ punter/
 
 ## ⚡ Quick Start
 
-### First Time Setup
-See **[GETTING_STARTED.md](./GETTING_STARTED.md)** for complete step-by-step instructions.
+See **[GETTING_STARTED.md](./GETTING_STARTED.md)** for complete setup instructions.
 
-### Daily Workflow
-
-**Every time you open Cursor:**
-
-**Frontend** (Terminal 1):
-```bash
-cd frontend
-npm run dev
-```
-→ Runs on `http://localhost:3000`
-
-**Backend** (Terminal 2):
-```bash
-cd backend
-source venv/bin/activate    # ← IMPORTANT! Activate venv first
-uvicorn app.main:app --reload
-```
-→ Runs on `http://localhost:8000`  
-→ API docs at `http://localhost:8000/docs`
-
-### Helper Scripts
-
-You can also use the helper scripts:
-```bash
-./start-frontend.sh    # Starts frontend
-./start-backend.sh      # Starts backend (auto-activates venv)
-```
+For daily workflow tips and development shortcuts, see **[TIPS_AND_TRICKS.md](./TIPS_AND_TRICKS.md)**.
 
 ## 🔐 Authentication (Supabase)
 
@@ -104,21 +77,6 @@ To test:
   - All Supabase calls are client-side; RLS enforces per-user access
   - Soft delete sets `deleted_at` and list view fetches only rows where `deleted_at is null`
 
-## 🔍 Virtual Environment Notes
-
-**Why activate venv?**
-- Python packages install globally by default (can mess up your system)
-- Virtual environment isolates packages per project
-- **Always activate before running backend or installing packages**
-
-**How to verify venv is active:**
-- Your terminal prompt should show `(venv)` at the start
-- Example: `(venv) angustylee@MacBook punter %`
-
-**Node.js doesn't need activation:**
-- `npm install` automatically isolates packages in `node_modules/`
-- No virtual environment needed for frontend
-
 ## 📚 Learning Resources
 
 - **Next.js**: [Official Docs](https://nextjs.org/docs)
@@ -126,16 +84,3 @@ To test:
 - **FastAPI**: [FastAPI Tutorial](https://fastapi.tiangolo.com/tutorial/)
 - **Supabase**: [Supabase Docs](https://supabase.com/docs)
 
-## 🎯 Using Cursor
-
-- **Ask questions**: Press `Cmd+L (Mac) or `Ctrl+L` (Windows) to chat
-- **Get help**: Select code and ask "What does this do?"
-- **Generate code**: Ask "Create a login page" or "Add a user API endpoint"
-- **Fix errors**: Paste error messages and ask for help
-
-## 🚦 Next Steps
-
-1. Complete first-time setup (see `GETTING_STARTED.md`)
-2. Set up your Supabase project
-3. Configure environment variables
-4. Start building your first feature!

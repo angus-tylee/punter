@@ -148,13 +148,6 @@ Your full-stack application is now running:
 - Verify the `venv` folder exists: `ls -la venv`
 - If missing, recreate it: `python3 -m venv venv`
 
-## 💡 Tips
-
-- **Always activate venv** before working on backend (see main README for daily workflow)
-- Use `npm run dev` for frontend development (hot reload enabled)
-- FastAPI auto-reloads when you use `--reload` flag
-- Check Supabase dashboard for database changes and logs
-
 ## 📚 Next Steps
 
 1. **Explore the code:**
