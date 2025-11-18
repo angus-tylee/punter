@@ -37,6 +37,30 @@ export default function RespondPage() {
   useEffect(() => {
     let mounted = true;
     const load = async () => {
+      // Check if submission already completed (prevent resubmission on browser back)
+      const submissionFlag = sessionStorage.getItem(`submission_${id}`);
+      const expirationTime = sessionStorage.getItem(`submission_${id}_expires`);
+      
+      if (submissionFlag) {
+        // Check if expiration time exists and has passed
+        if (expirationTime) {
+          const expires = parseInt(expirationTime, 10);
+          if (Date.now() > expires) {
+            // Expired, clear flags and allow new submission
+            sessionStorage.removeItem(`submission_${id}`);
+            sessionStorage.removeItem(`submission_${id}_expires`);
+          } else {
+            // Still valid, redirect to thank you page
+            router.push(`/panoramas/${id}/thank-you`);
+            return;
+          }
+        } else {
+          // No expiration, but flag exists, redirect to thank you page
+          router.push(`/panoramas/${id}/thank-you`);
+          return;
+        }
+      }
+
       // Load panorama
       const { data: panoramaData, error: panoramaError } = await supabase
         .from("panoramas")
@@ -83,7 +107,7 @@ export default function RespondPage() {
     return () => {
       mounted = false;
     };
-  }, [id]);
+  }, [id, router]);
 
   const handleResponseChange = (questionId: string, value: any) => {
     setResponses((prev) => ({
@@ -168,6 +192,30 @@ export default function RespondPage() {
       }
     }
 
+    // Check if already submitted (prevent duplicate submissions)
+    const submissionFlag = sessionStorage.getItem(`submission_${id}`);
+    const expirationTime = sessionStorage.getItem(`submission_${id}_expires`);
+    
+    if (submissionFlag) {
+      // Check if expiration time exists and has passed
+      if (expirationTime) {
+        const expires = parseInt(expirationTime, 10);
+        if (Date.now() <= expires) {
+          // Still valid, redirect to thank you page
+          router.push(`/panoramas/${id}/thank-you`);
+          return;
+        } else {
+          // Expired, clear flags and allow new submission
+          sessionStorage.removeItem(`submission_${id}`);
+          sessionStorage.removeItem(`submission_${id}_expires`);
+        }
+      } else {
+        // No expiration, but flag exists, redirect to thank you page
+        router.push(`/panoramas/${id}/thank-you`);
+        return;
+      }
+    }
+
     // Insert all responses
     const { error: insertError } = await supabase
       .from("responses")
@@ -179,9 +227,13 @@ export default function RespondPage() {
       return;
     }
 
-    // Success - show message and redirect
-    alert("Thank you! Your response has been submitted.");
-    router.push("/");
+    // Success - set sessionStorage flag and redirect to thank you page
+    sessionStorage.setItem(`submission_${id}`, "true");
+    // Set expiration (1 hour)
+    const newExpirationTime = Date.now() + 60 * 60 * 1000;
+    sessionStorage.setItem(`submission_${id}_expires`, newExpirationTime.toString());
+    
+    router.push(`/panoramas/${id}/thank-you`);
   };
 
   if (loading) {
