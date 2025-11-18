@@ -194,6 +194,57 @@ export default function ResponsesPage() {
     return q?.question_text || "Unknown question";
   };
 
+  const handleExportCSV = async () => {
+    if (responses.length === 0) return;
+    
+    setExporting(true);
+    try {
+      const response = await fetch(`${API_URL}/api/panoramas/${id}/export/csv`, {
+        method: "GET",
+      });
+
+      if (!response.ok) {
+        throw new Error(`Export failed: ${response.status}`);
+      }
+
+      // Get the filename from Content-Disposition header or generate one
+      const contentDisposition = response.headers.get("Content-Disposition");
+      let filename = `${panoramaName.replace(/[^a-z0-9]/gi, '_')}_results_${new Date().toISOString().split('T')[0]}.csv`;
+      if (contentDisposition) {
+        // Try to extract filename from Content-Disposition header
+        // Handles both: filename="name.csv" and filename=name.csv
+        const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
+        if (filenameMatch && filenameMatch[1]) {
+          // Remove quotes if present
+          const extracted = filenameMatch[1].replace(/['"]/g, '');
+          if (extracted) {
+            filename = extracted;
+          }
+        }
+      }
+
+      // Convert response to blob and trigger download
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      setToast({ message: "CSV export complete", type: "success" });
+      setTimeout(() => setToast(null), 3000);
+    } catch (error) {
+      console.error("Export error:", error);
+      setToast({ message: "Export failed. Please try again later.", type: "error" });
+      setTimeout(() => setToast(null), 3000);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   if (loading) {
     return (
       <main className="mx-auto max-w-4xl p-6">
@@ -207,8 +258,21 @@ export default function ResponsesPage() {
       <div className="mb-4">
         <Link className="underline text-sm" href={`/panoramas/${id}`}>Back</Link>
       </div>
-      <div className="mb-4">
+      <div className="mb-4 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Responses: {panoramaName}</h1>
+        <button
+          onClick={handleExportCSV}
+          disabled={responses.length === 0 || exporting}
+          className={`rounded-md px-4 py-2 text-sm font-medium transition-colors ${
+            responses.length === 0 || exporting
+              ? "bg-gray-300 dark:bg-gray-700 text-gray-500 dark:text-gray-400 cursor-not-allowed"
+              : "bg-black text-white dark:bg-white dark:text-black hover:opacity-90"
+          }`}
+          title={responses.length === 0 ? "No responses to export yet" : "Download survey results as CSV"}
+          aria-label="Download survey results as CSV"
+        >
+          {exporting ? "Exporting..." : "Export CSV"}
+        </button>
       </div>
 
       {/* Tab Navigation */}
@@ -412,6 +476,15 @@ export default function ResponsesPage() {
             </div>
           )}
         </div>
+      )}
+
+      {/* Toast Notification */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
       )}
     </main>
   );

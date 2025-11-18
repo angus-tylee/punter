@@ -218,6 +218,38 @@ def generate_slug(text: str) -> str:
     return slug
 
 
+def format_timestamp(timestamp_str: str) -> str:
+    """Format ISO timestamp to human-readable format that still works for date/time columns"""
+    try:
+        # Handle different timestamp formats
+        ts = timestamp_str.strip()
+        
+        # Replace Z with +00:00 for timezone handling (Python's fromisoformat needs explicit timezone)
+        if ts.endswith('Z'):
+            ts = ts[:-1] + '+00:00'
+        
+        # Parse ISO format timestamp (handles both with and without timezone)
+        dt = datetime.fromisoformat(ts)
+        
+        # Format as YYYY-MM-DD HH:MM:SS (works well in Excel/Sheets as date-time)
+        # This format is recognized by Excel and Google Sheets as a date-time column
+        return dt.strftime('%Y-%m-%d %H:%M:%S')
+    except Exception as e:
+        # If parsing fails, return original
+        print(f"Error formatting timestamp {timestamp_str}: {e}")
+        return timestamp_str
+
+
+def format_question_header(question_text: str) -> str:
+    """Convert question text to human-readable header without underscores"""
+    # Remove trailing question marks and whitespace
+    header = question_text.strip().rstrip('?')
+    # Replace underscores with spaces
+    header = header.replace('_', ' ')
+    # Capitalize first letter of each word
+    return ' '.join(word.capitalize() for word in header.split())
+
+
 @router.get("/panoramas/{panorama_id}/export/csv")
 async def export_panorama_csv(panorama_id: str):
     """
@@ -236,7 +268,7 @@ async def export_panorama_csv(panorama_id: str):
         panorama_name = panorama_result.data[0]["name"]
         
         # Fetch all questions ordered by order field
-        questions_result = supabase.table("questions").select("id, question_text, question_type, options, order").eq("panorama_id", panorama_id).order("order", ascending=True).execute()
+        questions_result = supabase.table("questions").select("id, question_text, question_type, options, order").eq("panorama_id", panorama_id).order("order").execute()
         
         if not questions_result.data:
             raise HTTPException(status_code=400, detail="No questions found for this panorama")
@@ -244,7 +276,7 @@ async def export_panorama_csv(panorama_id: str):
         questions = questions_result.data
         
         # Fetch all responses
-        responses_result = supabase.table("responses").select("id, question_id, submission_id, response_text, respondent_id, created_at").eq("panorama_id", panorama_id).order("created_at", ascending=True).execute()
+        responses_result = supabase.table("responses").select("id, question_id, submission_id, response_text, respondent_id, created_at").eq("panorama_id", panorama_id).order("created_at").execute()
         
         responses = responses_result.data if responses_result.data else []
         
@@ -255,14 +287,17 @@ async def export_panorama_csv(panorama_id: str):
             writer = csv.writer(output)
             
             # Write headers
-            headers = ["submission_id", "submitted_at", "respondent_id"]
+            headers = ["Submission ID", "Submitted At", "Respondent ID"]
             for q in questions:
-                slug = generate_slug(q["question_text"])
-                headers.append(f"question_{q['id']}_{slug}")
+                header = format_question_header(q["question_text"])
+                headers.append(header)
             writer.writerow(headers)
             
             output.seek(0)
-            filename = f"{panorama_name}_results_{datetime.now().strftime('%Y-%m-%d')}.csv"
+            # Sanitize panorama name for filename (remove special characters)
+            safe_name = re.sub(r'[^\w\s-]', '', panorama_name).strip()
+            safe_name = re.sub(r'[-\s]+', '_', safe_name)
+            filename = f"{safe_name}_results_{datetime.now().strftime('%Y-%m-%d')}.csv"
             
             return StreamingResponse(
                 iter([output.getvalue()]),
@@ -298,16 +333,16 @@ async def export_panorama_csv(panorama_id: str):
         writer = csv.writer(output)
         
         # Write headers
-        headers = ["submission_id", "submitted_at", "respondent_id"]
+        headers = ["Submission ID", "Submitted At", "Respondent ID"]
         question_map = {}
         for q in questions:
-            slug = generate_slug(q["question_text"])
-            column_name = f"question_{q['id']}_{slug}"
-            headers.append(column_name)
+            header = format_question_header(q["question_text"])
+            headers.append(header)
             question_map[q["id"]] = {
-                "column": column_name,
+                "column": header,
                 "type": q["question_type"],
-                "options": q.get("options")
+                "options": q.get("options"),
+                "question_text": q["question_text"]
             }
         writer.writerow(headers)
         
@@ -315,7 +350,7 @@ async def export_panorama_csv(panorama_id: str):
         for submission_id, submission_data in submissions.items():
             row = [
                 submission_data["submission_id"],
-                submission_data["submitted_at"],
+                format_timestamp(submission_data["submitted_at"]),
                 submission_data["respondent_id"] or ""
             ]
             
@@ -335,7 +370,7 @@ async def export_panorama_csv(panorama_id: str):
                         values = [r["response_text"] for r in question_responses]
                         row.append(", ".join(values))
                     elif question_type == "budget-allocation":
-                        # Format budget allocation as readable string
+                        # Format budget allocation alphabetically by artist name, including $0 for unselected artists
                         try:
                             # Get the first response (should only be one for budget-allocation)
                             response_text = question_responses[0]["response_text"]
@@ -345,21 +380,42 @@ async def export_panorama_csv(panorama_id: str):
                                 if options and isinstance(options, dict) and "artists" in options:
                                     artist_list = options["artists"]
                                     formatted = []
+                                    
                                     if isinstance(allocation, dict):
-                                        for artist_id, amount in allocation.items():
-                                            artist = next((a for a in artist_list if a.get("id") == artist_id), None)
-                                            if artist:
-                                                formatted.append(f"{artist.get('name', 'Unknown')}: ${amount}")
-                                            else:
-                                                formatted.append(f"Unknown: ${amount}")
+                                        # Create a map of all artists with their amounts (default to 0)
+                                        artist_amounts = {}
+                                        for artist in artist_list:
+                                            artist_id = artist.get("id")
+                                            artist_name = artist.get("name", "Unknown")
+                                            # Get amount from allocation if artist was selected, otherwise 0
+                                            amount = allocation.get(artist_id, 0)
+                                            artist_amounts[artist_name] = amount
+                                        
+                                        # Sort alphabetically by artist name
+                                        sorted_artists = sorted(artist_amounts.items())
+                                        
+                                        # Format as "Artist Name: $amount"
+                                        formatted = [f"{name}: ${amount}" for name, amount in sorted_artists]
+                                    
                                     row.append(", ".join(formatted) if formatted else response_text)
                                 else:
                                     # Fallback to JSON string
                                     row.append(response_text)
                             else:
-                                row.append("")
-                        except:
+                                # No response - show all artists with $0
+                                options = question_info["options"]
+                                if options and isinstance(options, dict) and "artists" in options:
+                                    artist_list = options["artists"]
+                                    formatted = []
+                                    for artist in sorted(artist_list, key=lambda x: x.get("name", "")):
+                                        artist_name = artist.get("name", "Unknown")
+                                        formatted.append(f"{artist_name}: $0")
+                                    row.append(", ".join(formatted))
+                                else:
+                                    row.append("")
+                        except Exception as e:
                             # If parsing fails, use raw text
+                            print(f"Error formatting budget allocation: {e}")
                             row.append(question_responses[0]["response_text"])
                     else:
                         # Single value (text, textarea, Single-select, Likert)
@@ -368,7 +424,10 @@ async def export_panorama_csv(panorama_id: str):
             writer.writerow(row)
         
         output.seek(0)
-        filename = f"{panorama_name}_results_{datetime.now().strftime('%Y-%m-%d')}.csv"
+        # Sanitize panorama name for filename (remove special characters)
+        safe_name = re.sub(r'[^\w\s-]', '', panorama_name).strip()
+        safe_name = re.sub(r'[-\s]+', '_', safe_name)
+        filename = f"{safe_name}_results_{datetime.now().strftime('%Y-%m-%d')}.csv"
         
         return StreamingResponse(
             iter([output.getvalue()]),
