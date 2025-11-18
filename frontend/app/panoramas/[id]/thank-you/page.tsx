@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import PreviewBanner from "@/components/survey/PreviewBanner";
 
 type Panorama = {
   id: string;
@@ -14,7 +15,9 @@ type Panorama = {
 export default function ThankYouPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
+  const searchParams = useSearchParams();
   const id = params?.id as string;
+  const isPreview = searchParams.get("preview") === "true";
 
   const [panorama, setPanorama] = useState<Panorama | null>(null);
   const [loading, setLoading] = useState(true);
@@ -23,26 +26,29 @@ export default function ThankYouPage() {
   useEffect(() => {
     let mounted = true;
     const load = async () => {
-      // Check sessionStorage for submission flag and expiration
-      const submissionFlag = sessionStorage.getItem(`submission_${id}`);
-      const expirationTime = sessionStorage.getItem(`submission_${id}_expires`);
-      
-      if (!submissionFlag) {
-        // If no submission flag, redirect back to respond page
-        // This prevents direct URL access without submission
-        router.push(`/panoramas/${id}/respond`);
-        return;
-      }
-
-      // Check if expiration time exists and has passed
-      if (expirationTime) {
-        const expires = parseInt(expirationTime, 10);
-        if (Date.now() > expires) {
-          // Expired, clear flags and redirect
-          sessionStorage.removeItem(`submission_${id}`);
-          sessionStorage.removeItem(`submission_${id}_expires`);
+      // In preview mode, skip sessionStorage validation
+      if (!isPreview) {
+        // Check sessionStorage for submission flag and expiration
+        const submissionFlag = sessionStorage.getItem(`submission_${id}`);
+        const expirationTime = sessionStorage.getItem(`submission_${id}_expires`);
+        
+        if (!submissionFlag) {
+          // If no submission flag, redirect back to respond page
+          // This prevents direct URL access without submission
           router.push(`/panoramas/${id}/respond`);
           return;
+        }
+
+        // Check if expiration time exists and has passed
+        if (expirationTime) {
+          const expires = parseInt(expirationTime, 10);
+          if (Date.now() > expires) {
+            // Expired, clear flags and redirect
+            sessionStorage.removeItem(`submission_${id}`);
+            sessionStorage.removeItem(`submission_${id}_expires`);
+            router.push(`/panoramas/${id}/respond`);
+            return;
+          }
         }
       }
 
@@ -97,7 +103,8 @@ export default function ThankYouPage() {
 
   return (
     <div className="min-h-screen bg-white dark:bg-gray-900">
-      <main className="mx-auto max-w-2xl p-6 min-h-screen flex items-center justify-center">
+      {isPreview && <PreviewBanner />}
+      <main className={`mx-auto max-w-2xl p-6 min-h-screen flex items-center justify-center ${isPreview ? 'pt-16' : ''}`}>
         <div className="w-full text-center space-y-6">
           {/* Panorama name */}
           {panorama && (
@@ -114,7 +121,7 @@ export default function ThankYouPage() {
               Thank you for completing the survey!
             </h1>
             <p className="text-lg text-gray-600 dark:text-gray-400">
-              Your response has been recorded.
+              {isPreview ? "This is a preview. Your response would have been recorded." : "Your response has been recorded."}
             </p>
           </div>
         </div>
