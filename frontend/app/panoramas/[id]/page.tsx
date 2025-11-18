@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
+import Toast from "@/components/ui/Toast";
+import { copyToClipboard } from "@/lib/utils/copyToClipboard";
 
 type Panorama = {
   id: string;
@@ -46,6 +48,8 @@ export default function PanoramaDetailPage() {
   const [savingQuestion, setSavingQuestion] = useState(false);
   const [budgetAmount, setBudgetAmount] = useState(100);
   const [artists, setArtists] = useState<Array<{ id: string; name: string; imageUrl: string }>>([]);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
+  const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     let mounted = true;
@@ -279,6 +283,46 @@ export default function PanoramaDetailPage() {
     await loadQuestions();
   };
 
+  const handleCopyLink = async () => {
+    if (!id || status !== "active") return;
+
+    const publicUrl = `${window.location.origin}/panoramas/${id}/respond`;
+    const success = await copyToClipboard(publicUrl);
+
+    if (success) {
+      setToast({ message: "Survey link copied!", type: "success" });
+    } else {
+      setToast({ message: "Could not copy. Please copy manually.", type: "error" });
+    }
+
+    // Clear any existing timeout
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+    }
+
+    // Auto-dismiss toast after 3 seconds
+    toastTimeoutRef.current = setTimeout(() => {
+      setToast(null);
+      toastTimeoutRef.current = null;
+    }, 3000);
+  };
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (toastTimeoutRef.current) {
+        clearTimeout(toastTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const handleKeyDown = (e: React.KeyboardEvent, action: () => void) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      action();
+    }
+  };
+
   if (loading) {
     return (
       <main className="mx-auto max-w-2xl p-6">
@@ -300,8 +344,23 @@ export default function PanoramaDetailPage() {
 
   if (!item) return null;
 
+  const handleCloseToast = () => {
+    if (toastTimeoutRef.current) {
+      clearTimeout(toastTimeoutRef.current);
+      toastTimeoutRef.current = null;
+    }
+    setToast(null);
+  };
+
   return (
     <main className="mx-auto max-w-2xl p-6">
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={handleCloseToast}
+        />
+      )}
       <div className="mb-4">
         <Link className="underline text-sm" href="/">Back</Link>
       </div>
@@ -360,9 +419,59 @@ export default function PanoramaDetailPage() {
           <h2 className="text-xl font-semibold">Questions</h2>
           <div className="flex items-center gap-3">
             {status === "active" && (
-              <Link className="underline text-sm" href={`/panoramas/${id}/respond`}>
-                Public Form
-              </Link>
+              <>
+                <Link className="underline text-sm" href={`/panoramas/${id}/respond`}>
+                  Public Form
+                </Link>
+                <button
+                  onClick={handleCopyLink}
+                  onKeyDown={(e) => handleKeyDown(e, handleCopyLink)}
+                  className="underline text-sm flex items-center gap-1"
+                  aria-label="Copy public survey link to clipboard"
+                  title="Copy survey URL to clipboard"
+                >
+                  <svg
+                    className="h-4 w-4"
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                  Copy Link
+                </button>
+              </>
+            )}
+            {status !== "active" && (
+              <div className="relative group">
+                <button
+                  disabled
+                  className="underline text-sm flex items-center gap-1 opacity-50 cursor-not-allowed"
+                  aria-label="Copy public survey link to clipboard (disabled - publish survey to enable)"
+                  title="Publish survey to enable link sharing"
+                >
+                  <svg
+                    className="h-4 w-4"
+                    fill="none"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                  Copy Link
+                </button>
+                <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-2 py-1 text-xs text-white bg-gray-900 dark:bg-gray-700 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10">
+                  Publish survey to enable link sharing
+                </div>
+              </div>
             )}
             <Link className="underline text-sm" href={`/panoramas/${id}/responses`}>
               View Responses

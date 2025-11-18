@@ -1,9 +1,15 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, List, Union
 from supabase import create_client, Client
 from app.config import settings
 from app.services.llm_service import LLMService
+import csv
+import io
+import re
+import json
+from datetime import datetime
 
 router = APIRouter()
 
@@ -198,4 +204,186 @@ async def save_questions(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to save questions: {str(e)}")
+
+
+def generate_slug(text: str) -> str:
+    """Generate a URL-friendly slug from text"""
+    # Convert to lowercase
+    slug = text.lower()
+    # Replace spaces and special characters with underscores
+    slug = re.sub(r'[^\w\s-]', '', slug)
+    slug = re.sub(r'[-\s]+', '_', slug)
+    # Remove leading/trailing underscores
+    slug = slug.strip('_')
+    return slug
+
+
+@router.get("/panoramas/{panorama_id}/export/csv")
+async def export_panorama_csv(panorama_id: str):
+    """
+    Export all responses for a panorama as CSV.
+    Returns a streaming CSV response with all response data.
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        # Verify panorama exists
+        panorama_result = supabase.table("panoramas").select("id, name").eq("id", panorama_id).execute()
+        
+        if not panorama_result.data or len(panorama_result.data) == 0:
+            raise HTTPException(status_code=404, detail="Panorama not found")
+        
+        panorama_name = panorama_result.data[0]["name"]
+        
+        # Fetch all questions ordered by order field
+        questions_result = supabase.table("questions").select("id, question_text, question_type, options, order").eq("panorama_id", panorama_id).order("order", ascending=True).execute()
+        
+        if not questions_result.data:
+            raise HTTPException(status_code=400, detail="No questions found for this panorama")
+        
+        questions = questions_result.data
+        
+        # Fetch all responses
+        responses_result = supabase.table("responses").select("id, question_id, submission_id, response_text, respondent_id, created_at").eq("panorama_id", panorama_id).order("created_at", ascending=True).execute()
+        
+        responses = responses_result.data if responses_result.data else []
+        
+        # If no responses, return empty CSV with headers
+        if not responses:
+            # Create empty CSV with headers
+            output = io.StringIO()
+            writer = csv.writer(output)
+            
+            # Write headers
+            headers = ["submission_id", "submitted_at", "respondent_id"]
+            for q in questions:
+                slug = generate_slug(q["question_text"])
+                headers.append(f"question_{q['id']}_{slug}")
+            writer.writerow(headers)
+            
+            output.seek(0)
+            filename = f"{panorama_name}_results_{datetime.now().strftime('%Y-%m-%d')}.csv"
+            
+            return StreamingResponse(
+                iter([output.getvalue()]),
+                media_type="text/csv; charset=utf-8",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Content-Type": "text/csv; charset=utf-8"
+                }
+            )
+        
+        # Group responses by submission_id
+        submissions: dict = {}
+        for response in responses:
+            submission_id = response["submission_id"]
+            if submission_id not in submissions:
+                submissions[submission_id] = {
+                    "submission_id": submission_id,
+                    "submitted_at": response["created_at"],
+                    "respondent_id": response.get("respondent_id") or "",
+                    "responses": {}
+                }
+            
+            question_id = response["question_id"]
+            if question_id not in submissions[submission_id]["responses"]:
+                submissions[submission_id]["responses"][question_id] = []
+            
+            submissions[submission_id]["responses"][question_id].append(response)
+        
+        # Create CSV
+        output = io.StringIO()
+        # Add UTF-8 BOM for Excel compatibility
+        output.write('\ufeff')
+        writer = csv.writer(output)
+        
+        # Write headers
+        headers = ["submission_id", "submitted_at", "respondent_id"]
+        question_map = {}
+        for q in questions:
+            slug = generate_slug(q["question_text"])
+            column_name = f"question_{q['id']}_{slug}"
+            headers.append(column_name)
+            question_map[q["id"]] = {
+                "column": column_name,
+                "type": q["question_type"],
+                "options": q.get("options")
+            }
+        writer.writerow(headers)
+        
+        # Write data rows
+        for submission_id, submission_data in submissions.items():
+            row = [
+                submission_data["submission_id"],
+                submission_data["submitted_at"],
+                submission_data["respondent_id"] or ""
+            ]
+            
+            # Add answer for each question
+            for q in questions:
+                question_id = q["id"]
+                question_responses = submission_data["responses"].get(question_id, [])
+                
+                if not question_responses:
+                    row.append("")
+                else:
+                    question_info = question_map[question_id]
+                    question_type = question_info["type"]
+                    
+                    if question_type == "Multi-select":
+                        # Combine multiple responses with comma delimiter
+                        values = [r["response_text"] for r in question_responses]
+                        row.append(", ".join(values))
+                    elif question_type == "budget-allocation":
+                        # Format budget allocation as readable string
+                        try:
+                            # Get the first response (should only be one for budget-allocation)
+                            response_text = question_responses[0]["response_text"]
+                            if response_text:
+                                allocation = json.loads(response_text) if isinstance(response_text, str) else response_text
+                                options = question_info["options"]
+                                if options and isinstance(options, dict) and "artists" in options:
+                                    artist_list = options["artists"]
+                                    formatted = []
+                                    if isinstance(allocation, dict):
+                                        for artist_id, amount in allocation.items():
+                                            artist = next((a for a in artist_list if a.get("id") == artist_id), None)
+                                            if artist:
+                                                formatted.append(f"{artist.get('name', 'Unknown')}: ${amount}")
+                                            else:
+                                                formatted.append(f"Unknown: ${amount}")
+                                    row.append(", ".join(formatted) if formatted else response_text)
+                                else:
+                                    # Fallback to JSON string
+                                    row.append(response_text)
+                            else:
+                                row.append("")
+                        except:
+                            # If parsing fails, use raw text
+                            row.append(question_responses[0]["response_text"])
+                    else:
+                        # Single value (text, textarea, Single-select, Likert)
+                        row.append(question_responses[0]["response_text"])
+            
+            writer.writerow(row)
+        
+        output.seek(0)
+        filename = f"{panorama_name}_results_{datetime.now().strftime('%Y-%m-%d')}.csv"
+        
+        return StreamingResponse(
+            iter([output.getvalue()]),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Type": "text/csv; charset=utf-8"
+            }
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Unexpected error exporting CSV: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to export CSV: {str(e)}")
 

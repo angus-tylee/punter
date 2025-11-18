@@ -1,5 +1,6 @@
 """Service for generating executive summaries using LLM"""
 import json
+from pathlib import Path
 from typing import Dict, List, Any, Optional
 from app.services.llm_service import LLMService
 
@@ -9,6 +10,16 @@ class SummaryGenerator:
     
     def __init__(self, llm_service: LLMService):
         self.llm_service = llm_service
+        self._prompts_dir = Path(__file__).parent.parent.parent / "prompts"
+        self._summary_system_prompt = self._load_prompt("summary_generation_system.txt")
+        self._summary_prompt_template = self._load_prompt("summary_generation.txt")
+    
+    def _load_prompt(self, filename: str) -> str:
+        """Load prompt template from file"""
+        prompt_path = self._prompts_dir / filename
+        if not prompt_path.exists():
+            raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
+        return prompt_path.read_text()
     
     async def generate_summary(
         self,
@@ -44,7 +55,7 @@ class SummaryGenerator:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are an expert data analyst specializing in event feedback and survey analysis. You create concise, insightful executive summaries that tell a story from the data. Always respond with valid JSON only, no markdown or additional text."
+                        "content": self._summary_system_prompt
                     },
                     {
                         "role": "user",
@@ -86,7 +97,6 @@ class SummaryGenerator:
         """Build prompt for LLM"""
         
         # Extract key statistics
-        overall_satisfaction = aggregated_stats.get("overall_satisfaction")
         top_positive = aggregated_stats.get("top_positive_question")
         top_negative = aggregated_stats.get("top_negative_question")
         
@@ -99,42 +109,21 @@ class SummaryGenerator:
                     text_summary.append(f"Question: {question.get('question_text', '')}")
                     text_summary.append(f"Sample responses: {', '.join(samples[:3])}")
         
-        prompt = f"""Analyze this event feedback survey and create a concise executive summary.
-
-EVENT CONTEXT:
-Event Name: {panorama.get('name', 'Event')}
-Total Responses: {response_count}
-
-KEY STATISTICS:
-{self._format_stats(aggregated_stats)}
-
-TOP POSITIVE AREA:
-{self._format_question_summary(top_positive) if top_positive else 'None identified'}
-
-TOP CONCERN AREA:
-{self._format_question_summary(top_negative) if top_negative else 'None identified'}
-
-TEXT RESPONSE SAMPLES:
-{chr(10).join(text_summary) if text_summary else 'No text responses'}
-
-Create a 2-3 sentence executive summary that:
-1. Captures the overall sentiment
-2. Highlights the main strength
-3. Identifies the primary area for improvement
-4. Uses natural, conversational language (not robotic)
-
-Also extract 2-3 key metrics that stand out.
-
-Return JSON in this format:
-{{
-  "summary": "Your 2-3 sentence narrative summary here",
-  "keyMetrics": [
-    {{"label": "Metric name", "value": "metric value", "type": "positive|negative|neutral"}},
-    ...
-  ]
-}}"""
+        # Format values using helper methods
+        key_statistics = self._format_stats(aggregated_stats)
+        top_positive_area = self._format_question_summary(top_positive) if top_positive else 'None identified'
+        top_concern_area = self._format_question_summary(top_negative) if top_negative else 'None identified'
+        text_response_samples = '\n'.join(text_summary) if text_summary else 'No text responses'
         
-        return prompt
+        # Format the template with pre-formatted values
+        return self._summary_prompt_template.format(
+            event_name=panorama.get('name', 'Event'),
+            response_count=response_count,
+            key_statistics=key_statistics,
+            top_positive_area=top_positive_area,
+            top_concern_area=top_concern_area,
+            text_response_samples=text_response_samples
+        )
     
     def _format_stats(self, stats: Dict[str, Any]) -> str:
         """Format statistics for prompt"""

@@ -1,0 +1,35 @@
+Analyze this event feedback survey and create a concise executive summary.
+
+EVENT CONTEXT:
+Event Name: {event_name}
+Total Responses: {response_count}
+
+KEY STATISTICS:
+{key_statistics}
+
+TOP POSITIVE AREA:
+{top_positive_area}
+
+TOP CONCERN AREA:
+{top_concern_area}
+
+TEXT RESPONSE SAMPLES:
+{text_response_samples}
+
+Create a 2-3 sentence executive summary that:
+1. Captures the overall sentiment
+2. Highlights the main strength
+3. Identifies the primary area for improvement
+4. Uses natural, conversational language (not robotic)
+
+Also extract 2-3 key metrics that stand out.
+
+Return JSON in this format:
+{{
+  "summary": "Your 2-3 sentence narrative summary here",
+  "keyMetrics": [
+    {{"label": "Metric name", "value": "metric value", "type": "positive|negative|neutral"}},
+    ...
+  ]
+}}
+

@@ -13,6 +13,7 @@ import KeyMetrics from "@/components/analytics/KeyMetrics";
 import QuickWins from "@/components/analytics/QuickWins";
 import QuestionInsight from "@/components/analytics/QuestionInsight";
 import WordCloud from "@/components/analytics/WordCloud";
+import Toast from "@/components/ui/Toast";
 
 type Response = {
   id: string;
@@ -30,6 +31,8 @@ type ResponseGroup = {
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d', '#ffc658', '#ff7300'];
 
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+
 export default function ResponsesPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
@@ -42,6 +45,8 @@ export default function ResponsesPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"insights" | "responses">("insights");
   const [viewMode, setViewMode] = useState<"by-question" | "by-submission">("by-submission");
+  const [exporting, setExporting] = useState(false);
+  const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
 
   useEffect(() => {
     let mounted = true;

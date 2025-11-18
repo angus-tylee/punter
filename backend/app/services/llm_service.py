@@ -1,5 +1,6 @@
 import json
 import re
+from pathlib import Path
 from typing import Dict, List, Optional
 from openai import OpenAI
 from app.config import settings
@@ -12,6 +13,16 @@ class LLMService:
         if not settings.openai_api_key:
             raise ValueError("OPENAI_API_KEY not configured. Please set it in your .env file.")
         self.client = OpenAI(api_key=settings.openai_api_key)
+        self._prompts_dir = Path(__file__).parent.parent / "prompts"
+        self._question_system_prompt = self._load_prompt("question_generation_system.txt")
+        self._question_prompt_template = self._load_prompt("question_generation.txt")
+    
+    def _load_prompt(self, filename: str) -> str:
+        """Load prompt template from file"""
+        prompt_path = self._prompts_dir / filename
+        if not prompt_path.exists():
+            raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
+        return prompt_path.read_text()
     
     def generate_survey_questions(self, context: Dict[str, str]) -> List[Dict]:
         """
@@ -44,7 +55,7 @@ class LLMService:
                 messages=[
                     {
                         "role": "system",
-                        "content": "You are an expert survey designer specializing in venues and music festivals. You create comprehensive, well-reasoned surveys using industry best practices. Always respond with valid JSON only, no markdown or additional text."
+                        "content": self._question_system_prompt
                     },
                     {
                         "role": "user",
@@ -79,92 +90,21 @@ class LLMService:
     
     def _build_prompt(self, context: Dict[str, str]) -> str:
         """Build the prompt for LLM with deep reasoning for venues and music festivals"""
+        # Process goals - convert list to comma-separated string if needed
         goals = context.get("goals", "")
         if isinstance(goals, list):
             goals = ", ".join(goals)
         
-        prompt = f"""You are an expert survey designer specializing in venues and music festivals. Your task is to create a comprehensive 25-question post-event feedback survey.
-
-CRITICAL INSTRUCTIONS:
-1. Generate EXACTLY 25 questions - no more, no less
-2. Use the user's input below as context (20-30% influence) but generate 70-80% of questions from industry best practices and deep reasoning
-3. Do NOT simply rephrase the user's input - think beyond it and apply event-industry expertise
-4. Focus exclusively on venues and music festivals - this is your domain expertise
-
-USER CONTEXT (use as 20-30% influence):
-Event Type: {context.get('event_type', 'Music Festival')}
-Event Name: {context.get('event_name', 'Untitled Event')}
-Primary Goals: {goals}
-What they want to learn: {context.get('learning_objectives', 'General feedback')}
-Target Audience: {context.get('audience', 'Attendees')}
-Event Timing: {context.get('timing', 'Not specified')}
-Additional Context: {context.get('additional_context', 'None')}
-
-REQUIRED DIMENSIONS (cover all 6 with deep reasoning):
-
-1. EVENT EXPERIENCE (4-5 questions)
-   - Overall satisfaction, event flow, energy levels, atmosphere
-   - Examples: "How would you rate the overall energy and atmosphere of the event?", "Did the event meet your expectations?"
-
-2. MUSIC LINEUP & ATMOSPHERE (4-5 questions)
-   - Sound quality, artist diversity, stage setup, performance timing, genre variety
-   - Examples: "How would you rate the sound quality across different stages?", "How satisfied were you with the diversity of artists and genres?"
-
-3. VENUE LOGISTICS (4-5 questions)
-   - Accessibility, amenities, safety, facilities, crowd flow, entry/exit experience
-   - Examples: "How accessible was the venue for people with mobility needs?", "How would you rate the cleanliness and maintenance of facilities?"
-
-4. COMMUNICATION & MARKETING (3-4 questions)
-   - Pre-event information, social media presence, announcements, schedule clarity
-   - Examples: "How clear and helpful was the pre-event communication?", "Did you find the event schedule easy to access and understand?"
-
-5. SUSTAINABILITY & INCLUSIVITY (3-4 questions)
-   - Eco-friendly practices, accessibility features, diversity and inclusion, environmental impact
-   - Examples: "How would you rate the event's commitment to sustainability?", "Did you feel the event was inclusive and welcoming to all attendees?"
-
-6. POST-EVENT ENGAGEMENT (2-3 questions)
-   - Follow-up communication, community building, future event interest, sharing experience
-   - Examples: "How likely are you to attend future events by this organizer?", "Would you share your experience on social media?"
-
-QUESTION TYPE DISTRIBUTION:
-- ~40% Multiple choice (Single-select or Multi-select)
-- ~40% Likert scale (5-point: Strongly Disagree, Disagree, Neutral, Agree, Strongly Agree)
-- ~20% Short text response (text or textarea)
-
-Return a JSON object with this exact structure:
-{{
-  "questions": [
-    {{
-      "question_text": "How would you rate the overall energy and atmosphere of the event?",
-      "question_type": "Likert",
-      "options": ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"],
-      "required": true
-    }},
-    {{
-      "question_text": "Which aspects of the music lineup did you enjoy most?",
-      "question_type": "Multi-select",
-      "options": ["Headliner performances", "Supporting acts", "Genre diversity", "Stage production", "Sound quality"],
-      "required": false
-    }},
-    {{
-      "question_text": "What specific improvements would you suggest for future events?",
-      "question_type": "textarea",
-      "options": null,
-      "required": false
-    }}
-  ]
-}}
-
-IMPORTANT: 
-- question_type must be one of: "text", "textarea", "Single-select", "Multi-select", "Likert"
-- For Single-select, Multi-select, and Likert, provide options array
-- For Likert, always use: ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"]
-- For text and textarea, set options to null
-- Generate EXACTLY 25 questions covering all 6 dimensions
-- Use deep reasoning and best practices - don't just rephrase user input
-- Return valid JSON only, no markdown formatting"""
-        
-        return prompt
+        # Format the template with context variables
+        return self._question_prompt_template.format(
+            event_type=context.get('event_type', 'Music Festival'),
+            event_name=context.get('event_name', 'Untitled Event'),
+            goals=goals,
+            learning_objectives=context.get('learning_objectives', 'General feedback'),
+            audience=context.get('audience', 'Attendees'),
+            timing=context.get('timing', 'Not specified'),
+            additional_context=context.get('additional_context', 'None')
+        )
     
     def _parse_response(self, content: str) -> List[Dict]:
         """Parse LLM response and extract questions"""
