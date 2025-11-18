@@ -6,11 +6,13 @@ import SingleSelectQuestion from "./SingleSelectQuestion";
 import MultiSelectQuestion from "./MultiSelectQuestion";
 import LikertQuestion from "./LikertQuestion";
 import BudgetAllocation from "./BudgetAllocation";
+import EmailQuestion from "./EmailQuestion";
+import PhoneQuestion from "./PhoneQuestion";
 
 type Question = {
   id: string;
   question_text: string;
-  question_type: "text" | "textarea" | "Single-select" | "Multi-select" | "Likert" | "budget-allocation";
+  question_type: "text" | "textarea" | "Single-select" | "Multi-select" | "Likert" | "budget-allocation" | "email" | "phone";
   options: string[] | any | null;
   required: boolean;
   order: number;
@@ -94,6 +96,28 @@ export default function QuestionRenderer({ question, value, onChange }: Question
           budget={budgetOptions.budget || 100}
           artists={budgetOptions.artists || []}
           value={value as { [key: string]: number } | null}
+          onChange={(val) => onChange(val)}
+          required={question.required}
+        />
+      );
+
+    case "email":
+      return (
+        <EmailQuestion
+          questionId={question.id}
+          questionText={question.question_text}
+          value={value as string | null}
+          onChange={(val) => onChange(val)}
+          required={question.required}
+        />
+      );
+
+    case "phone":
+      return (
+        <PhoneQuestion
+          questionId={question.id}
+          questionText={question.question_text}
+          value={value as string | null}
           onChange={(val) => onChange(val)}
           required={question.required}
         />

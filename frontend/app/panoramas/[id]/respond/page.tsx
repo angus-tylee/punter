@@ -8,7 +8,7 @@ import SurveyLayout from "@/components/survey/SurveyLayout";
 type Question = {
   id: string;
   question_text: string;
-  question_type: "text" | "textarea" | "Single-select" | "Multi-select" | "Likert" | "budget-allocation";
+  question_type: "text" | "textarea" | "Single-select" | "Multi-select" | "Likert" | "budget-allocation" | "email" | "phone";
   options: string[] | any | null;
   required: boolean;
   order: number;
@@ -120,11 +120,29 @@ export default function RespondPage() {
     setError(null);
     setSubmitting(true);
 
+    // Validation helpers
+    const validateName = (name: string): boolean => {
+      // Alphabetic characters, apostrophes, hyphens allowed
+      return /^[a-zA-Z'\-]+$/.test(name.trim());
+    };
+
+    const validateEmail = (email: string): boolean => {
+      // RFC 5322 compliant email regex (simplified but covers most cases)
+      const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+      return emailRegex.test(email.trim());
+    };
+
+    const validatePhone = (phone: string): boolean => {
+      // E.164 format: +[country code][number] (e.g., +14155552671)
+      const phoneRegex = /^\+[1-9]\d{1,14}$/;
+      return phoneRegex.test(phone.trim());
+    };
+
     // Validate required questions
     for (const q of questions) {
       if (q.required) {
         const response = responses[q.id];
-        if (!response) {
+        if (!response || (typeof response === "string" && !response.trim())) {
           setError(`Please answer the required question: ${q.question_text}`);
           setSubmitting(false);
           return;
@@ -143,6 +161,54 @@ export default function RespondPage() {
           const total = Object.values(allocation || {}).reduce((sum, val) => sum + val, 0);
           if (total === 0) {
             setError(`Please allocate your budget for: ${q.question_text}`);
+            setSubmitting(false);
+            return;
+          }
+        }
+
+        // Validate name fields (First Name, Last Name)
+        if (q.question_type === "text" && typeof response === "string") {
+          if (q.question_text === "First Name" || q.question_text === "Last Name") {
+            if (!validateName(response)) {
+              setError(`${q.question_text} can only contain letters, apostrophes, and hyphens`);
+              setSubmitting(false);
+              return;
+            }
+          }
+        }
+
+        // Validate email
+        if (q.question_type === "email" && typeof response === "string") {
+          if (!validateEmail(response)) {
+            setError(`Please enter a valid email address for: ${q.question_text}`);
+            setSubmitting(false);
+            return;
+          }
+        }
+
+        // Validate phone
+        if (q.question_type === "phone" && typeof response === "string" && response.trim()) {
+          if (!validatePhone(response)) {
+            setError(`Please enter a valid phone number in international format (e.g., +14155552671) for: ${q.question_text}`);
+            setSubmitting(false);
+            return;
+          }
+        }
+      }
+
+      // Validate optional fields if they have values
+      if (!q.required) {
+        const response = responses[q.id];
+        if (response && typeof response === "string" && response.trim()) {
+          // Validate email format if provided
+          if (q.question_type === "email" && !validateEmail(response)) {
+            setError(`Please enter a valid email address for: ${q.question_text}`);
+            setSubmitting(false);
+            return;
+          }
+          // Validate phone format if provided
+          if (q.question_type === "phone" && !validatePhone(response)) {
+            setError(`Please enter a valid phone number in international format (e.g., +14155552671) for: ${q.question_text}`);
             setSubmitting(false);
             return;
           }
@@ -182,7 +248,7 @@ export default function RespondPage() {
           response_text: JSON.stringify(allocation),
         });
       } else {
-        // Single response (text, textarea, single-select, Likert)
+        // Single response (text, textarea, single-select, Likert, email, phone)
         responseRows.push({
           panorama_id: id,
           question_id: q.id,

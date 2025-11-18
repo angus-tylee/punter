@@ -5,6 +5,7 @@ from typing import Optional, List, Union
 from supabase import create_client, Client
 from app.config import settings
 from app.services.llm_service import LLMService
+from app.services.universal_questions import get_universal_questions
 import csv
 import io
 import re
@@ -160,42 +161,96 @@ async def save_questions(
 ):
     """
     Save questions to a panorama after staging review.
+    Automatically prepends universal questions.
     """
     try:
         supabase = get_supabase_client()
         
-        # Verify panorama exists and user has access
-        panorama_result = supabase.table("panoramas").select("id, owner_id").eq("id", panorama_id).execute()
+        # Verify panorama exists and user has access, fetch config
+        panorama_result = supabase.table("panoramas").select("id, owner_id, universal_questions_config").eq("id", panorama_id).execute()
         
         if not panorama_result.data or len(panorama_result.data) == 0:
             raise HTTPException(status_code=404, detail="Panorama not found")
         
-        # Prepare questions data
-        questions_data = []
-        for q in request.questions:
+        panorama = panorama_result.data[0]
+        config = panorama.get("universal_questions_config", {}) or {}
+        
+        # Delete existing universal questions for this panorama
+        try:
+            supabase.table("questions").delete().eq("panorama_id", panorama_id).eq("is_universal", True).execute()
+        except Exception as e:
+            print(f"Warning: Error deleting existing universal questions: {e}")
+        
+        # Generate universal questions
+        universal_questions = get_universal_questions(panorama_id, config)
+        
+        # Prepare universal questions data
+        universal_questions_data = []
+        for q in universal_questions:
+            universal_questions_data.append({
+                "panorama_id": panorama_id,
+                "question_text": q["question_text"],
+                "question_type": q["question_type"],
+                "options": q.get("options"),
+                "required": q["required"],
+                "order": q["order"],
+                "is_universal": True
+            })
+        
+        # Prepare LLM-generated questions data, adjusting order to start at 0
+        llm_questions_data = []
+        for i, q in enumerate(request.questions):
             question_data = {
                 "panorama_id": panorama_id,
                 "question_text": q.question_text,
                 "question_type": q.question_type,
                 "options": q.options,
                 "required": q.required,
-                "order": q.order
+                "order": i,  # Start at 0, universal questions have negative orders
+                "is_universal": False
             }
-            questions_data.append(question_data)
+            llm_questions_data.append(question_data)
         
-        if not questions_data:
+        # Combine all questions (universal first, then LLM)
+        all_questions_data = universal_questions_data + llm_questions_data
+        
+        # Allow saving even if only universal questions (no LLM questions yet)
+        if not all_questions_data:
             raise HTTPException(status_code=400, detail="No questions provided")
         
-        # Insert questions
+        # If only universal questions, that's fine - they'll be created
+        if not llm_questions_data and universal_questions_data:
+            # Just insert universal questions
+            try:
+                supabase.table("questions").insert(universal_questions_data).execute()
+            except Exception as e:
+                print(f"Questions creation error: {e}")
+                import traceback
+                traceback.print_exc()
+                raise HTTPException(status_code=500, detail=f"Failed to save universal questions: {str(e)}")
+            
+            return {
+                "success": True,
+                "questions_saved": len(universal_questions_data),
+                "universal_questions": len(universal_questions_data),
+                "llm_questions": 0
+            }
+        
+        # Insert all questions
         try:
-            supabase.table("questions").insert(questions_data).execute()
+            supabase.table("questions").insert(all_questions_data).execute()
         except Exception as e:
             print(f"Questions creation error: {e}")
             import traceback
             traceback.print_exc()
             raise HTTPException(status_code=500, detail=f"Failed to save questions: {str(e)}")
         
-        return {"success": True, "questions_saved": len(questions_data)}
+        return {
+            "success": True,
+            "questions_saved": len(all_questions_data),
+            "universal_questions": len(universal_questions_data),
+            "llm_questions": len(llm_questions_data)
+        }
         
     except HTTPException:
         raise
@@ -268,12 +323,28 @@ async def export_panorama_csv(panorama_id: str):
         panorama_name = panorama_result.data[0]["name"]
         
         # Fetch all questions ordered by order field
-        questions_result = supabase.table("questions").select("id, question_text, question_type, options, order").eq("panorama_id", panorama_id).order("order").execute()
+        questions_result = supabase.table("questions").select("id, question_text, question_type, options, order, is_universal").eq("panorama_id", panorama_id).order("order").execute()
         
         if not questions_result.data:
             raise HTTPException(status_code=400, detail="No questions found for this panorama")
         
-        questions = questions_result.data
+        all_questions = questions_result.data
+        
+        # Separate universal and main questions
+        universal_questions = [q for q in all_questions if q.get("is_universal", False)]
+        main_questions = [q for q in all_questions if not q.get("is_universal", False)]
+        
+        # Map universal question texts to friendly column names
+        universal_column_map = {
+            "First Name": "First Name",
+            "Last Name": "Last Name",
+            "Email Address": "Email",
+            "Phone Number": "Phone",
+            "Where is your home base / where did you grow up?": "Home Base",
+            "Where do you currently live?": "Current Location",
+            "Age bracket": "Age Bracket",
+            "Occupation / Field of Work": "Occupation"
+        }
         
         # Fetch all responses
         responses_result = supabase.table("responses").select("id, question_id, submission_id, response_text, respondent_id, created_at").eq("panorama_id", panorama_id).order("created_at").execute()
@@ -288,7 +359,12 @@ async def export_panorama_csv(panorama_id: str):
             
             # Write headers
             headers = ["Submission ID", "Submitted At", "Respondent ID"]
-            for q in questions:
+            # Add universal question columns
+            for q in universal_questions:
+                column_name = universal_column_map.get(q["question_text"], format_question_header(q["question_text"]))
+                headers.append(column_name)
+            # Add main survey question columns
+            for q in main_questions:
                 header = format_question_header(q["question_text"])
                 headers.append(header)
             writer.writerow(headers)
@@ -335,7 +411,20 @@ async def export_panorama_csv(panorama_id: str):
         # Write headers
         headers = ["Submission ID", "Submitted At", "Respondent ID"]
         question_map = {}
-        for q in questions:
+        
+        # Add universal question columns
+        for q in universal_questions:
+            column_name = universal_column_map.get(q["question_text"], format_question_header(q["question_text"]))
+            headers.append(column_name)
+            question_map[q["id"]] = {
+                "column": column_name,
+                "type": q["question_type"],
+                "options": q.get("options"),
+                "question_text": q["question_text"]
+            }
+        
+        # Add main survey question columns
+        for q in main_questions:
             header = format_question_header(q["question_text"])
             headers.append(header)
             question_map[q["id"]] = {
@@ -354,8 +443,8 @@ async def export_panorama_csv(panorama_id: str):
                 submission_data["respondent_id"] or ""
             ]
             
-            # Add answer for each question
-            for q in questions:
+            # Add answer for each question (universal first, then main)
+            for q in universal_questions + main_questions:
                 question_id = q["id"]
                 question_responses = submission_data["responses"].get(question_id, [])
                 

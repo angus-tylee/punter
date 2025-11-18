@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from openai import OpenAI
 from app.config import settings
+from app.services.universal_questions import get_universal_question_texts
 
 
 class LLMService:
@@ -96,7 +97,7 @@ class LLMService:
             goals = ", ".join(goals)
         
         # Format the template with context variables
-        return self._question_prompt_template.format(
+        prompt = self._question_prompt_template.format(
             event_type=context.get('event_type', 'Music Festival'),
             event_name=context.get('event_name', 'Untitled Event'),
             goals=goals,
@@ -105,6 +106,14 @@ class LLMService:
             timing=context.get('timing', 'Not specified'),
             additional_context=context.get('additional_context', 'None')
         )
+        
+        # Dynamically append universal questions list
+        universal_question_texts = get_universal_question_texts()
+        prompt += "\n\nThe following questions are automatically included in every survey. Do not create questions similar to these:\n"
+        for i, q_text in enumerate(universal_question_texts, 1):
+            prompt += f"{i}. {q_text}\n"
+        
+        return prompt
     
     def _parse_response(self, content: str) -> List[Dict]:
         """Parse LLM response and extract questions"""
@@ -134,9 +143,19 @@ class LLMService:
         return []
     
     def _validate_questions(self, questions: List[Dict]) -> List[Dict]:
-        """Validate and normalize question structure"""
+        """Validate and normalize question structure, and filter out demographic questions"""
         valid_types = ["text", "textarea", "Single-select", "Multi-select", "Likert"]
         validated = []
+        
+        # Get universal question texts for deduplication
+        universal_question_texts = get_universal_question_texts()
+        universal_texts_lower = [q.lower() for q in universal_question_texts]
+        
+        # Keywords to detect demographic questions
+        demographic_keywords = [
+            "name", "email", "phone", "age", "location", "occupation", "demographic",
+            "where did you grow up", "where do you live", "home base", "grow up", "currently live"
+        ]
         
         for i, q in enumerate(questions):
             if not isinstance(q, dict):
@@ -144,6 +163,19 @@ class LLMService:
             
             question_text = q.get("question_text", "").strip()
             if not question_text:
+                continue
+            
+            # Post-processing filter: check for demographic questions
+            question_text_lower = question_text.lower()
+            
+            # Check for exact matches with universal questions
+            if question_text_lower in universal_texts_lower:
+                print(f"Warning: Removed duplicate demographic question: {question_text}")
+                continue
+            
+            # Check for keyword matches
+            if any(keyword in question_text_lower for keyword in demographic_keywords):
+                print(f"Warning: Removed demographic question (keyword match): {question_text}")
                 continue
             
             question_type = q.get("question_type", "text")

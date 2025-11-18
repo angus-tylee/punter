@@ -10,6 +10,7 @@ create table if not exists public.panoramas (
   name text not null,
   description text,
   status text not null default 'draft' check (status in ('draft','active','archived')),
+  universal_questions_config jsonb not null default '{}',
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   deleted_at timestamptz null
@@ -82,4 +83,17 @@ BEGIN
 END
 $$;
 
+-- Migration: Add universal_questions_config column (if table already exists)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+    AND table_name = 'panoramas' 
+    AND column_name = 'universal_questions_config'
+  ) THEN
+    ALTER TABLE public.panoramas ADD COLUMN universal_questions_config jsonb NOT NULL DEFAULT '{}';
+  END IF;
+END
+$$;
 

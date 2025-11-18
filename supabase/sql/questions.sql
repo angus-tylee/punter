@@ -5,10 +5,11 @@ create table if not exists public.questions (
   id uuid primary key default gen_random_uuid(),
   panorama_id uuid not null references public.panoramas(id) on delete cascade,
   question_text text not null,
-  question_type text not null check (question_type in ('text', 'textarea', 'Single-select', 'Multi-select', 'Likert', 'budget-allocation')),
+  question_type text not null check (question_type in ('text', 'textarea', 'Single-select', 'Multi-select', 'Likert', 'budget-allocation', 'email', 'phone')),
   options jsonb null,
   required boolean not null default false,
   "order" integer not null default 0,
+  is_universal boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -122,13 +123,27 @@ BEGIN
     EXECUTE format('ALTER TABLE public.questions DROP CONSTRAINT %I', constraint_name);
   END IF;
   
-  -- Add the new constraint with Likert and budget-allocation included
+  -- Add the new constraint with Likert, budget-allocation, email, and phone included
   ALTER TABLE public.questions ADD CONSTRAINT questions_question_type_check 
-    CHECK (question_type IN ('text', 'textarea', 'Single-select', 'Multi-select', 'Likert', 'budget-allocation'));
+    CHECK (question_type IN ('text', 'textarea', 'Single-select', 'Multi-select', 'Likert', 'budget-allocation', 'email', 'phone'));
 EXCEPTION
   WHEN duplicate_object THEN
     -- Constraint already exists, ignore
     NULL;
+END
+$$;
+
+-- Migration: Add is_universal column (if table already exists)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+    AND table_name = 'questions' 
+    AND column_name = 'is_universal'
+  ) THEN
+    ALTER TABLE public.questions ADD COLUMN is_universal boolean NOT NULL DEFAULT false;
+  END IF;
 END
 $$;
 

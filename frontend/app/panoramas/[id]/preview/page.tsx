@@ -9,7 +9,7 @@ import PreviewBanner from "@/components/survey/PreviewBanner";
 type Question = {
   id: string;
   question_text: string;
-  question_type: "text" | "textarea" | "Single-select" | "Multi-select" | "Likert" | "budget-allocation";
+  question_type: "text" | "textarea" | "Single-select" | "Multi-select" | "Likert" | "budget-allocation" | "email" | "phone";
   options: string[] | any | null;
   required: boolean;
   order: number;

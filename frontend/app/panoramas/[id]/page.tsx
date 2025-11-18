@@ -18,10 +18,11 @@ type Panorama = {
 type Question = {
   id: string;
   question_text: string;
-  question_type: "text" | "textarea" | "Single-select" | "Multi-select" | "Likert" | "budget-allocation";
+  question_type: "text" | "textarea" | "Single-select" | "Multi-select" | "Likert" | "budget-allocation" | "email" | "phone";
   options: string[] | any | null;
   required: boolean;
   order: number;
+  is_universal?: boolean;
 };
 
 export default function PanoramaDetailPage() {
@@ -50,6 +51,14 @@ export default function PanoramaDetailPage() {
   const [artists, setArtists] = useState<Array<{ id: string; name: string; imageUrl: string }>>([]);
   const [toast, setToast] = useState<{ message: string; type: "success" | "error" } | null>(null);
   const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [universalQuestionsConfig, setUniversalQuestionsConfig] = useState<{
+    phone?: boolean;
+    home_base?: boolean;
+    current_location?: boolean;
+    age_bracket?: boolean;
+    occupation?: boolean;
+  }>({});
+  const [savingConfig, setSavingConfig] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -61,7 +70,7 @@ export default function PanoramaDetailPage() {
       }
       const { data, error } = await supabase
         .from("panoramas")
-        .select("id,name,description,status,updated_at")
+        .select("id,name,description,status,updated_at,universal_questions_config")
         .eq("id", id)
         .maybeSingle();
       if (error) console.error(error);
@@ -73,6 +82,8 @@ export default function PanoramaDetailPage() {
         setName((data as Panorama).name);
         setDescription(((data as Panorama).description ?? "") as string);
         setStatus((data as Panorama).status);
+        const config = (data as any).universal_questions_config || {};
+        setUniversalQuestionsConfig(config);
       }
       setLoading(false);
     };
@@ -139,7 +150,7 @@ export default function PanoramaDetailPage() {
   const loadQuestions = async () => {
     const { data, error } = await supabase
       .from("questions")
-      .select("id,question_text,question_type,options,required,order")
+      .select("id,question_text,question_type,options,required,order,is_universal")
       .eq("panorama_id", id)
       .order("order", { ascending: true });
     if (error) {
@@ -245,6 +256,92 @@ export default function PanoramaDetailPage() {
     setSavingQuestion(false);
     cancelQuestionForm();
     await loadQuestions();
+  };
+
+  const onSaveUniversalConfig = async () => {
+    setSavingConfig(true);
+    setError(null);
+    
+    try {
+      // Save config
+      const { error: updateError } = await supabase
+        .from("panoramas")
+        .update({ universal_questions_config: universalQuestionsConfig })
+        .eq("id", id);
+      
+      if (updateError) {
+        setError(updateError.message);
+        setSavingConfig(false);
+        return;
+      }
+
+      // Regenerate universal questions by calling the backend
+      // Delete existing universal questions
+      const { error: deleteError } = await supabase
+        .from("questions")
+        .delete()
+        .eq("panorama_id", id)
+        .eq("is_universal", true);
+      
+      if (deleteError) {
+        console.error("Error deleting universal questions:", deleteError);
+      }
+
+      // Get current non-universal questions
+      const currentQuestions = questions.filter(q => !q.is_universal);
+      
+      // Re-save questions to trigger universal question regeneration
+      if (currentQuestions.length > 0) {
+        const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const response = await fetch(`${API_URL}/api/panoramas/${id}/save-questions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            questions: currentQuestions.map(q => ({
+              question_text: q.question_text,
+              question_type: q.question_type,
+              options: q.options,
+              required: q.required,
+              order: q.order
+            }))
+          })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ detail: "Failed to regenerate universal questions" }));
+          throw new Error(errorData.detail || "Failed to regenerate universal questions");
+        }
+      } else {
+        // If no questions, create universal questions directly
+        // We'll insert them manually since save_questions requires at least one question
+        const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+        const response = await fetch(`${API_URL}/api/panoramas/${id}/save-questions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            questions: [] // Empty array - backend will still create universal questions
+          })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ detail: "Failed to create universal questions" }));
+          // If this fails, it's okay - universal questions will be created when first question is added
+          console.warn("Could not create universal questions without main questions:", errorData);
+        }
+      }
+
+      await loadQuestions();
+      setSavingConfig(false);
+      setMsg("Universal questions updated");
+      setTimeout(() => setMsg(null), 1500);
+    } catch (err: any) {
+      setError(err.message || "Failed to save universal questions config");
+      setSavingConfig(false);
+    }
   };
 
   const onDeleteQuestion = async (questionId: string) => {
@@ -420,6 +517,72 @@ export default function PanoramaDetailPage() {
       </form>
 
       <div className="mt-8 pt-8 border-t border-gray-200 dark:border-gray-800">
+        <div className="mb-8">
+          <h2 className="text-xl font-semibold mb-4">Universal Questions Settings</h2>
+          <div className="p-4 border border-gray-200 dark:border-gray-800 rounded-md space-y-3">
+            <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
+              Required questions (First Name, Last Name, Email) are always included and cannot be disabled.
+            </p>
+            <div className="space-y-2">
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={universalQuestionsConfig.phone || false}
+                  onChange={(e) => setUniversalQuestionsConfig({ ...universalQuestionsConfig, phone: e.target.checked })}
+                  className="rounded"
+                />
+                <span className="text-sm">Phone Number</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={universalQuestionsConfig.home_base || false}
+                  onChange={(e) => setUniversalQuestionsConfig({ ...universalQuestionsConfig, home_base: e.target.checked })}
+                  className="rounded"
+                />
+                <span className="text-sm">Where is your home base / where did you grow up?</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={universalQuestionsConfig.current_location || false}
+                  onChange={(e) => setUniversalQuestionsConfig({ ...universalQuestionsConfig, current_location: e.target.checked })}
+                  className="rounded"
+                />
+                <span className="text-sm">Where do you currently live?</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={universalQuestionsConfig.age_bracket || false}
+                  onChange={(e) => setUniversalQuestionsConfig({ ...universalQuestionsConfig, age_bracket: e.target.checked })}
+                  className="rounded"
+                />
+                <span className="text-sm">Age bracket</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={universalQuestionsConfig.occupation || false}
+                  onChange={(e) => setUniversalQuestionsConfig({ ...universalQuestionsConfig, occupation: e.target.checked })}
+                  className="rounded"
+                />
+                <span className="text-sm">Occupation / Field of Work</span>
+              </label>
+            </div>
+            <div className="flex items-center gap-2 pt-2">
+              <button
+                type="button"
+                onClick={onSaveUniversalConfig}
+                disabled={savingConfig}
+                className="rounded-md bg-black text-white dark:bg-white dark:text-black py-2 px-4 font-medium disabled:opacity-60 text-sm"
+              >
+                {savingConfig ? "Saving..." : "Save Settings"}
+              </button>
+            </div>
+          </div>
+        </div>
+
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-xl font-semibold">Questions</h2>
           <div className="flex items-center gap-3">
@@ -661,58 +824,71 @@ export default function PanoramaDetailPage() {
           <p className="text-sm text-gray-500">No questions yet. Add one to get started.</p>
         ) : (
           <ul className="space-y-2">
-            {questions.map((q) => (
-              <li key={q.id} className="rounded border border-gray-200 dark:border-gray-800 p-4">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="font-medium">{q.question_text}</span>
-                      {q.required && <span className="text-xs text-red-500">Required</span>}
-                      <span className="text-xs text-gray-500">({q.question_type})</span>
+            {questions.map((q) => {
+              const isUniversal = q.is_universal || false;
+              const isRequiredUniversal = isUniversal && (q.question_text === "First Name" || q.question_text === "Last Name" || q.question_text === "Email Address");
+              
+              return (
+                <li key={q.id} className={`rounded border border-gray-200 dark:border-gray-800 p-4 ${isUniversal ? "bg-gray-50 dark:bg-gray-900/50" : ""}`}>
+                  <div className="flex items-start justify-between">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-medium">{q.question_text}</span>
+                        {q.required && <span className="text-xs text-red-500">Required</span>}
+                        {isUniversal && <span className="text-xs text-blue-500">Universal</span>}
+                        <span className="text-xs text-gray-500">({q.question_type})</span>
+                      </div>
+                      {q.options && (
+                        <div className="text-xs text-gray-500 mt-1">
+                          {q.question_type === "budget-allocation" ? (
+                            <span>
+                              Budget: ${(q.options as any)?.budget || 0}, Artists: {(q.options as any)?.artists?.length || 0}
+                            </span>
+                          ) : Array.isArray(q.options) ? (
+                            <span>Options: {q.options.join(", ")}</span>
+                          ) : null}
+                        </div>
+                      )}
                     </div>
-                    {q.options && (
-                      <div className="text-xs text-gray-500 mt-1">
-                        {q.question_type === "budget-allocation" ? (
-                          <span>
-                            Budget: ${(q.options as any)?.budget || 0}, Artists: {(q.options as any)?.artists?.length || 0}
-                          </span>
-                        ) : Array.isArray(q.options) ? (
-                          <span>Options: {q.options.join(", ")}</span>
-                        ) : null}
+                    {!isUniversal && (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => moveQuestion(q.id, "up")}
+                          className="text-xs underline"
+                          disabled={questions.findIndex(x => x.id === q.id) === 0}
+                        >
+                          ↑
+                        </button>
+                        <button
+                          onClick={() => moveQuestion(q.id, "down")}
+                          className="text-xs underline"
+                          disabled={questions.findIndex(x => x.id === q.id) === questions.length - 1}
+                        >
+                          ↓
+                        </button>
+                        <button
+                          onClick={() => startEditQuestion(q)}
+                          className="text-xs underline"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => onDeleteQuestion(q.id)}
+                          className="text-xs underline text-red-500"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    )}
+                    {isUniversal && (
+                      <div className="text-xs text-gray-500 italic">
+                        Read-only
                       </div>
                     )}
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => moveQuestion(q.id, "up")}
-                      className="text-xs underline"
-                      disabled={questions.findIndex(x => x.id === q.id) === 0}
-                    >
-                      ↑
-                    </button>
-                    <button
-                      onClick={() => moveQuestion(q.id, "down")}
-                      className="text-xs underline"
-                      disabled={questions.findIndex(x => x.id === q.id) === questions.length - 1}
-                    >
-                      ↓
-                    </button>
-                    <button
-                      onClick={() => startEditQuestion(q)}
-                      className="text-xs underline"
-                    >
-                      Edit
-                    </button>
-                    <button
-                      onClick={() => onDeleteQuestion(q.id)}
-                      className="text-xs underline text-red-500"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
