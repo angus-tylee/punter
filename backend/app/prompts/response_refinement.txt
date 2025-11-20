@@ -1,6 +1,6 @@
 You are a survey question refinement expert. Your task is to improve a set of survey questions based on specific validation feedback.
 
-ORIGINAL QUESTIONS:
+ORIGINAL QUESTIONS (with sections):
 {original_questions}
 
 VALIDATION FEEDBACK:
@@ -9,44 +9,30 @@ VALIDATION FEEDBACK:
 REFINEMENT INSTRUCTIONS:
 {refinement_instructions}
 
-CONTEXT TOPICS THAT MUST BE COVERED:
+USER FOCUS AREAS THAT MUST BE COVERED:
 {context_topics}
-
-TIER 1 QUESTIONS (MUST BE INCLUDED):
-{tier_1_questions}
-
-TIER 2 QUESTIONS (SHOULD BE INCLUDED IF SPACE ALLOWS):
-{tier_2_questions}
-
-TARGET QUESTION COUNT: {target_count}
-
-REQUIRED DIMENSIONS (all 6 must be covered):
-1. EVENT EXPERIENCE
-2. MUSIC LINEUP & ATMOSPHERE
-3. VENUE LOGISTICS
-4. COMMUNICATION & MARKETING
-5. SUSTAINABILITY & INCLUSIVITY
-6. POST-EVENT ENGAGEMENT
 
 INSTRUCTIONS:
 - Fix all issues identified in the validation feedback
-- Ensure all Tier 1 questions are included
-- Include as many Tier 2 questions as space allows
-- Cover 80-90% of context topics
-- Meet the target question count (within ±2)
-- Ensure all 6 dimensions are covered
-- Maintain proper question type distribution (~40% multiple choice, ~40% Likert, ~20% text)
+- Ensure ALL user focus areas are expanded into sections with multiple questions
+- Add best practice questions to fill gaps (logistics, safety, marketing, overall experience)
 - Keep questions that are already good - only modify or add what's needed
+- Maintain section organization
 - Do not create questions about demographics (name, email, phone, age, location, occupation)
 
 Return a JSON object with this exact structure:
 {{
-  "questions": [
+  "sections": [
     {{
-      "question_text": "How would you rate the overall event experience?",
-      "question_type": "Single-select",
-      "options": ["Excellent", "Very Good", "Good", "Fair", "Poor"],
-      "required": true
+      "section_name": "Lineup & Music Experience",
+      "questions": [
+        {{
+          "question_text": "How satisfied were you with the overall music lineup?",
+          "question_type": "Likert",
+          "options": ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"],
+          "required": true
+        }}
+      ]
     }}
   ]
 }}
@@ -57,4 +43,4 @@ IMPORTANT:
 - For Likert, always use: ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"]
 - For text and textarea, set options to null
 - Return valid JSON only, no markdown formatting
-
+- Maintain sections structure
