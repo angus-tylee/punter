@@ -1,8 +1,9 @@
 CRITICAL INSTRUCTIONS:
-1. Generate EXACTLY 25 questions - no more, no less
-2. Use the user's input below as context (20-30% influence) but generate 70-80% of questions from industry best practices and deep reasoning
-3. Do NOT simply rephrase the user's input - think beyond it and apply event-industry expertise
-4. Focus exclusively on venues and music festivals - this is your domain expertise
+1. Generate {target_count} questions (target range: 25-30 based on context richness)
+2. Ensure 80-90% of the context topics below are covered with at least one question each
+3. Balance context-driven questions with industry best practices naturally
+4. Do NOT simply rephrase the user's input - think beyond it and apply event-industry expertise
+5. Focus exclusively on venues and music festivals - this is your domain expertise
 
 IMPORTANT: Do NOT generate questions about personal demographics (name, email, phone, age, location, occupation). These are collected automatically by the platform and will appear first in every survey.
 
@@ -10,7 +11,10 @@ The platform automatically collects demographic information including: name, ema
 
 A dynamic list of the exact universal questions will be provided below - do not create questions similar to any of them.
 
-USER CONTEXT (use as 20-30% influence):
+CONTEXT TOPICS TO COVER (aim for 80-90% coverage):
+{context_topics}
+
+USER CONTEXT:
 Event Type: {event_type}
 Event Name: {event_name}
 Primary Goals: {goals}
@@ -18,6 +22,17 @@ What they want to learn: {learning_objectives}
 Target Audience: {audience}
 Event Timing: {timing}
 Additional Context: {additional_context}
+
+CORE BEST PRACTICE QUESTIONS:
+
+TIER 1 (ALWAYS REQUIRED - MUST INCLUDE ALL):
+{tier_1_questions}
+
+TIER 2 (HIGH PRIORITY - INCLUDE IF SPACE ALLOWS):
+{tier_2_questions}
+
+TIER 3 (STANDARD PRACTICE - INCLUDE ONLY IF CONTEXT IS MINIMAL):
+{tier_3_questions}
 
 REQUIRED DIMENSIONS (cover all 6 with deep reasoning):
 
@@ -79,7 +94,10 @@ IMPORTANT:
 - For Single-select, Multi-select, and Likert, provide options array
 - For Likert, always use: ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"]
 - For text and textarea, set options to null
-- Generate EXACTLY 25 questions covering all 6 dimensions
+- Generate {target_count} questions (target range: 25-30) covering all 6 dimensions
+- MUST include all Tier 1 questions
+- Include Tier 2 questions if space allows
+- Cover 80-90% of context topics provided
 - Use deep reasoning and best practices - don't just rephrase user input
 - Return valid JSON only, no markdown formatting
 

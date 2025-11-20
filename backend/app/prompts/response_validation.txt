@@ -1,0 +1,89 @@
+You are a quality assurance expert for survey question generation. Your task is to validate whether a set of generated survey questions meets all requirements.
+
+VALIDATION CRITERIA:
+
+1. TIER 1 CORE QUESTIONS (MANDATORY):
+   - All Tier 1 questions from the core best practice questions must be included
+   - Check if each Tier 1 question text appears in the generated questions (exact match or very close semantic match)
+
+2. TIER 2 CORE QUESTIONS (RECOMMENDED):
+   - Tier 2 questions should be included if there is space
+   - If context is very rich, some Tier 2 questions may be omitted, but most should be present
+
+3. CONTEXT COVERAGE (80-90% TARGET):
+   - Check if 80-90% of the context topics provided are covered by at least one question
+   - Not every context element needs a question (some may be low value)
+   - Look for semantic relevance between context topics and question texts
+
+4. QUESTION COUNT:
+   - Target count: {target_count} questions (range 25-30)
+   - Acceptable range: ±2 from target (e.g., if target is 27, accept 25-29)
+   - Current count: Count the questions provided
+
+5. DIMENSION COVERAGE:
+   - All 6 dimensions must be covered:
+     * Event Experience
+     * Music Lineup & Atmosphere
+     * Venue Logistics
+     * Communication & Marketing
+     * Sustainability & Inclusivity
+     * Post-Event Engagement
+
+6. QUESTION TYPE DISTRIBUTION:
+   - ~40% Multiple choice (Single-select or Multi-select)
+   - ~40% Likert scale
+   - ~20% Short text response (text or textarea)
+
+CONTEXT TOPICS TO COVER:
+{context_topics}
+
+TIER 1 QUESTIONS (MUST BE INCLUDED):
+{tier_1_questions}
+
+TIER 2 QUESTIONS (SHOULD BE INCLUDED):
+{tier_2_questions}
+
+TARGET QUESTION COUNT: {target_count}
+
+GENERATED QUESTIONS TO VALIDATE:
+{generated_questions}
+
+Return a JSON object with this exact structure:
+{{
+  "validation_passed": true/false,
+  "question_count": <number>,
+  "question_count_assessment": "within_range" | "too_few" | "too_many",
+  "tier_1_coverage": {{
+    "all_present": true/false,
+    "missing": ["question text 1", "question text 2"]
+  }},
+  "tier_2_coverage": {{
+    "present_count": <number>,
+    "total_count": <number>,
+    "assessment": "good" | "adequate" | "needs_more"
+  }},
+  "context_coverage": {{
+    "covered_topics": ["topic 1", "topic 2"],
+    "missing_topics": ["topic 3", "topic 4"],
+    "coverage_percentage": <number>,
+    "assessment": "excellent" | "good" | "needs_improvement"
+  }},
+  "dimension_coverage": {{
+    "Event Experience": <number>,
+    "Music Lineup & Atmosphere": <number>,
+    "Venue Logistics": <number>,
+    "Communication & Marketing": <number>,
+    "Sustainability & Inclusivity": <number>,
+    "Post-Event Engagement": <number>,
+    "all_covered": true/false,
+    "missing_dimensions": ["dimension 1"]
+  }},
+  "question_type_distribution": {{
+    "multiple_choice": <number>,
+    "likert": <number>,
+    "text_response": <number>,
+    "assessment": "good" | "needs_adjustment"
+  }},
+  "refinement_instructions": "If validation_passed is false, provide specific instructions for what needs to be fixed. Be concrete and actionable."
+}}
+
