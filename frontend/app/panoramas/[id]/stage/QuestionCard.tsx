@@ -5,14 +5,12 @@ import { StagingQuestion, categorizeQuestion, QuestionCategory } from "./utils";
 
 type QuestionCardProps = {
   question: StagingQuestion;
-  isSuggested: boolean; // Kept for compatibility but not used
   onEdit?: (question: StagingQuestion, newText: string) => void;
   onDelete?: (question: StagingQuestion) => void;
 };
 
 export default function QuestionCard({
   question,
-  isSuggested,
   onEdit,
   onDelete
 }: QuestionCardProps) {

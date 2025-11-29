@@ -13,6 +13,13 @@ class Settings(BaseSettings):
     # LLM configuration
     openai_api_key: Optional[str] = None
     
+    # Instagram configuration
+    instagram_app_id: Optional[str] = None
+    instagram_app_secret: Optional[str] = None
+    instagram_access_token: Optional[str] = None
+    instagram_webhook_verify_token: Optional[str] = None
+    instagram_test_account_id: Optional[str] = None
+    
     # API configuration
     api_host: str = "0.0.0.0"
     api_port: int = 8000

@@ -47,9 +47,14 @@ backend/
 │   ├── config.py        # Configuration settings
 │   ├── api/             # API route handlers
 │   │   ├── __init__.py
-│   │   └── health.py    # Health check endpoint
-│   ├── models/          # Data models (Pydantic)
-│   └── services/        # Business logic
+│   │   ├── health.py    # Health check endpoint
+│   │   ├── panoramas.py # Panorama generation and management
+│   │   └── analytics.py # Analytics and summary generation
+│   ├── services/        # Business logic
+│   │   ├── llm_service.py
+│   │   ├── universal_questions.py
+│   │   └── analytics/   # Analytics services
+│   └── prompts/         # LLM prompt templates
 └── requirements.txt
 ```
 

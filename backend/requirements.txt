@@ -8,3 +8,4 @@ httpx>=0.26
 python-multipart==0.0.9
 openai>=1.0.0
 websockets>=15.0
+requests>=2.31.0

@@ -152,7 +152,6 @@ export default function StagingPage() {
               <QuestionCard
                 key={question.id}
                 question={question}
-                isSuggested={false}
                 onEdit={handleEdit}
                 onDelete={handleDelete}
               />
