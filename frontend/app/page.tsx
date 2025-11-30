@@ -50,7 +50,7 @@ export default function Home() {
         <h1 className="text-2xl font-semibold mb-4">Welcome to Punter</h1>
         <div className="flex gap-4 mb-6">
           <Link className="underline" href="/panoramas">Panoramas</Link>
-          <Link className="underline" href="/pulse">Pulse Surveys</Link>
+          {/* Pulse feature is hibernated - see PULSE_HIBERNATION.md for re-enablement instructions */}
         </div>
       </div>
       <div className="flex items-center justify-between mb-4">

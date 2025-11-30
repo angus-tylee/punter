@@ -1,3 +1,7 @@
+// PULSE FEATURE - HIBERNATED
+// This feature is currently hibernated due to Meta App Review requirements.
+// See PULSE_HIBERNATION.md for re-enablement instructions.
+
 "use client";
 
 import { useState } from "react";

@@ -15,6 +15,8 @@ Punter helps you create, distribute, and analyze surveys and feedback forms. Cre
 - **Survey Management**: Organize surveys (panoramas) with draft, active, and archived statuses
 - **User Profiles**: Personal accounts with authentication and profile management
 
+**Note:** Pulse Instagram integration feature is currently hibernated. See `PULSE_HIBERNATION.md` for details.
+
 ## Technical Overview
 
 Punter is a full-stack application with a modern architecture:

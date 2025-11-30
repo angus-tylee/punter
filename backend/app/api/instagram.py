@@ -1,3 +1,8 @@
+# PULSE FEATURE - HIBERNATED
+# This feature is currently hibernated due to Meta App Review requirements.
+# See PULSE_HIBERNATION.md for re-enablement instructions.
+# All code is intact and ready for use once App Review is completed.
+
 from fastapi import APIRouter, HTTPException, Header, Request
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
@@ -331,4 +336,3 @@ async def send_message(
     except Exception as e:
         print(f"Error sending message: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-

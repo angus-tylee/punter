@@ -1,3 +1,8 @@
+# PULSE FEATURE - HIBERNATED
+# This feature is currently hibernated due to Meta App Review requirements.
+# See PULSE_HIBERNATION.md for re-enablement instructions.
+# All code is intact and ready for use once App Review is completed.
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Union
@@ -297,4 +302,3 @@ async def get_pulse_responses(pulse_id: str):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to get responses: {str(e)}")
-
