@@ -2,16 +2,21 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 type Panorama = {
   id: string;
   name: string;
   status: "draft" | "active" | "archived";
+  type: "plan" | "pulse" | "playback" | null;
+  event_id: string | null;
   updated_at: string;
 };
 
 export default function PanoramasListPage() {
+  const searchParams = useSearchParams();
+  const eventId = searchParams.get("event_id");
   const [items, setItems] = useState<Panorama[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -20,10 +25,16 @@ export default function PanoramasListPage() {
     const load = async () => {
       const { data: sessionData } = await supabase.auth.getSession();
       if (!sessionData.session) return;
-      const { data, error } = await supabase
+      
+      let query = supabase
         .from("panoramas")
-        .select("id,name,status,updated_at")
-        .order("updated_at", { ascending: false });
+        .select("id,name,status,type,event_id,updated_at");
+      
+      if (eventId) {
+        query = query.eq("event_id", eventId);
+      }
+      
+      const { data, error } = await query.order("updated_at", { ascending: false });
       if (error) console.error(error);
       if (!mounted) return;
       setItems((data as Panorama[]) ?? []);
@@ -33,7 +44,7 @@ export default function PanoramasListPage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [eventId]);
 
   if (loading) {
     return (
@@ -62,7 +73,10 @@ export default function PanoramasListPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <div className="font-medium">{p.name}</div>
-                  <div className="text-xs text-gray-500">Status: {p.status} • Updated: {new Date(p.updated_at).toLocaleString()}</div>
+                  <div className="text-xs text-gray-500">
+                    {p.type && `${p.type.charAt(0).toUpperCase() + p.type.slice(1)} • `}
+                    Status: {p.status} • Updated: {new Date(p.updated_at).toLocaleString()}
+                  </div>
                 </div>
                 <Link className="underline text-sm" href={`/panoramas/${p.id}`}>Open</Link>
               </div>

@@ -6,6 +6,7 @@ from supabase import create_client, Client
 from app.config import settings
 from app.services.llm_service import LLMService
 from app.services.universal_questions import get_universal_questions
+from app.services.panorama_goals import get_goals_for_type, get_type_description
 import csv
 import io
 import re
@@ -18,6 +19,8 @@ router = APIRouter()
 class PanoramaContext(BaseModel):
     """Context for generating panorama from wizard"""
     user_id: str  # User ID from Supabase auth
+    event_id: Optional[str] = None  # Event ID if creating from event
+    panorama_type: Optional[str] = None  # 'plan', 'pulse', or 'playback'
     event_type: str
     event_name: str
     goals: List[str]
@@ -25,6 +28,9 @@ class PanoramaContext(BaseModel):
     audience: str
     timing: str
     additional_context: Optional[str] = None
+    high_level_questions: Optional[str] = None
+    low_level_questions: Optional[str] = None
+    survey_length: Optional[int] = None
 
 
 class StagingQuestion(BaseModel):
@@ -77,6 +83,16 @@ async def generate_panorama_from_context(
             print(f"LLM service initialization error: {e}")
             raise HTTPException(status_code=500, detail=f"LLM service error: {str(e)}")
         
+        # Load event data if event_id is provided
+        event_data = None
+        if context.event_id:
+            try:
+                event_result = supabase.table("events").select("*").eq("id", context.event_id).execute()
+                if event_result.data and len(event_result.data) > 0:
+                    event_data = event_result.data[0]
+            except Exception as e:
+                print(f"Warning: Could not load event data: {e}")
+        
         # Generate questions using LLM
         context_dict = {
             "event_type": context.event_type,
@@ -85,8 +101,22 @@ async def generate_panorama_from_context(
             "learning_objectives": context.learning_objectives,
             "audience": context.audience,
             "timing": context.timing,
-            "additional_context": context.additional_context or ""
+            "additional_context": context.additional_context or "",
+            "panorama_type": context.panorama_type,
+            "high_level_questions": context.high_level_questions or "",
+            "low_level_questions": context.low_level_questions or "",
+            "survey_length": context.survey_length
         }
+        
+        # Add event data if available
+        if event_data:
+            context_dict["event"] = {
+                "lineup": event_data.get("lineup", []),
+                "pricing_tiers": event_data.get("pricing_tiers", []),
+                "venue": event_data.get("venue"),
+                "target_market": event_data.get("target_market"),
+                "current_stage": event_data.get("current_stage")
+            }
         
         try:
             questions = llm_service.generate_survey_questions(context_dict)
@@ -106,6 +136,12 @@ async def generate_panorama_from_context(
             "description": f"Survey for {context.event_type}: {context.event_name}",
             "status": "draft"
         }
+        
+        # Add event_id and type if provided
+        if context.event_id:
+            panorama_data["event_id"] = context.event_id
+        if context.panorama_type:
+            panorama_data["type"] = context.panorama_type
         
         try:
             panorama_result = supabase.table("panoramas").insert(panorama_data).execute()
@@ -534,4 +570,128 @@ async def export_panorama_csv(panorama_id: str):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to export CSV: {str(e)}")
+
+
+class GoalsRequest(BaseModel):
+    """Request for panorama goals"""
+    panorama_type: str  # 'plan', 'pulse', or 'playback'
+
+
+@router.get("/panoramas/goals/{panorama_type}")
+async def get_panorama_goals(panorama_type: str):
+    """
+    Get template goals for a panorama type.
+    """
+    if panorama_type not in ["plan", "pulse", "playback"]:
+        raise HTTPException(status_code=400, detail="Invalid panorama type")
+    
+    goals = get_goals_for_type(panorama_type)
+    description = get_type_description(panorama_type)
+    
+    return {
+        "goals": goals,
+        "description": description
+    }
+
+
+class ContextSuggestionsRequest(BaseModel):
+    """Request for context suggestions"""
+    event_id: str
+    panorama_type: str
+    high_level_questions: Optional[str] = None
+    low_level_questions: Optional[str] = None
+
+
+@router.post("/panoramas/suggest-context")
+async def suggest_context(request: ContextSuggestionsRequest):
+    """
+    Generate contextual question suggestions based on event data.
+    """
+    try:
+        supabase = get_supabase_client()
+        
+        # Load event data
+        event_result = supabase.table("events").select("*").eq("id", request.event_id).execute()
+        
+        if not event_result.data or len(event_result.data) == 0:
+            raise HTTPException(status_code=404, detail="Event not found")
+        
+        event = event_result.data[0]
+        
+        # Prepare context for LLM
+        event_context = {
+            "name": event.get("name", ""),
+            "event_type": event.get("event_type", ""),
+            "date": event.get("date", ""),
+            "venue": event.get("venue", ""),
+            "lineup": event.get("lineup", []),
+            "pricing_tiers": event.get("pricing_tiers", []),
+            "target_market": event.get("target_market", ""),
+            "current_stage": event.get("current_stage", ""),
+            "panorama_type": request.panorama_type,
+            "high_level_questions": request.high_level_questions or "",
+            "low_level_questions": request.low_level_questions or "",
+        }
+        
+        # Use LLM to generate suggestions
+        try:
+            llm_service = LLMService()
+            
+            # Create a prompt for context suggestions
+            prompt = f"""Based on the following event information, suggest specific questions or areas to cover for a {request.panorama_type} panorama survey.
+
+Event: {event_context['name']}
+Type: {event_context['event_type']}
+Date: {event_context['date']}
+Venue: {event_context['venue']}
+Target Market: {event_context['target_market']}
+Current Stage: {event_context['current_stage']}
+
+The user has already mentioned:
+High-level questions/areas: {event_context['high_level_questions']}
+Low-level questions/areas: {event_context['low_level_questions']}
+
+Please provide 3-5 specific, actionable suggestions for questions or areas to cover in this survey. Format as a JSON array of strings, each being a suggestion.
+"""
+            
+            # For now, return placeholder suggestions
+            # In production, this would call the LLM
+            suggestions = [
+                f"Consider asking about {event_context.get('event_type', 'event')} preferences",
+                "Explore attendee expectations for lineup and artists",
+                "Gather feedback on pricing and value perception",
+            ]
+            
+            return {
+                "suggestions": suggestions,
+                "event_context": {
+                    "name": event_context["name"],
+                    "type": event_context["event_type"],
+                    "stage": event_context["current_stage"]
+                }
+            }
+            
+        except Exception as e:
+            print(f"LLM service error: {e}")
+            # Return fallback suggestions
+            return {
+                "suggestions": [
+                    "Consider asking about attendee preferences",
+                    "Explore expectations and goals",
+                    "Gather feedback on key event elements"
+                ],
+                "event_context": {
+                    "name": event_context["name"],
+                    "type": event_context["event_type"],
+                    "stage": event_context["current_stage"]
+                }
+            }
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error generating context suggestions: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Failed to generate suggestions: {str(e)}")
 

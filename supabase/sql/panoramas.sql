@@ -97,3 +97,30 @@ BEGIN
 END
 $$;
 
+-- Migration: Add event_id and type columns (if table already exists)
+DO $$
+BEGIN
+  -- Add event_id column (nullable for backward compatibility)
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+    AND table_name = 'panoramas' 
+    AND column_name = 'event_id'
+  ) THEN
+    ALTER TABLE public.panoramas ADD COLUMN event_id uuid REFERENCES public.events(id) ON DELETE SET NULL;
+    CREATE INDEX IF NOT EXISTS panoramas_event_id_idx ON public.panoramas(event_id);
+  END IF;
+
+  -- Add type column (nullable for backward compatibility)
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns 
+    WHERE table_schema = 'public' 
+    AND table_name = 'panoramas' 
+    AND column_name = 'type'
+  ) THEN
+    ALTER TABLE public.panoramas ADD COLUMN type text CHECK (type IS NULL OR type IN ('plan', 'pulse', 'playback'));
+    CREATE INDEX IF NOT EXISTS panoramas_type_idx ON public.panoramas(type);
+  END IF;
+END
+$$;
+

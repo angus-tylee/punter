@@ -49,7 +49,7 @@ export default function Home() {
       <div className="mb-6">
         <h1 className="text-2xl font-semibold mb-4">Welcome to Punter</h1>
         <div className="flex gap-4 mb-6">
-          <Link className="underline" href="/panoramas">Panoramas</Link>
+          <Link className="underline" href="/events">Events</Link>
         </div>
       </div>
       <div className="flex items-center justify-between mb-4">
