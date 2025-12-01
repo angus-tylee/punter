@@ -1,16 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 export default function ManualPanoramaPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const eventId = searchParams.get("event_id");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Redirect to home if no event_id is provided
+  useEffect(() => {
+    if (!eventId) {
+      router.replace("/");
+    }
+  }, [eventId, router]);
 
   const onCreate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -18,6 +27,10 @@ export default function ManualPanoramaPage() {
     const cleanName = name.trim();
     if (!cleanName) {
       setError("Name is required");
+      return;
+    }
+    if (!eventId) {
+      setError("Event ID is required");
       return;
     }
     setSaving(true);
@@ -33,7 +46,8 @@ export default function ManualPanoramaPage() {
         owner_id: session.user.id,
         name: cleanName,
         description: description || null,
-        status: "draft"
+        status: "draft",
+        event_id: eventId
       })
       .select("id")
       .single();
@@ -45,10 +59,14 @@ export default function ManualPanoramaPage() {
     router.push(`/panoramas/${data!.id}`);
   };
 
+  if (!eventId) {
+    return null; // Will redirect
+  }
+
   return (
     <main className="mx-auto max-w-2xl p-6">
       <div className="mb-4">
-        <Link className="underline text-sm" href="/panoramas/new">Back to Wizard</Link>
+        <Link className="underline text-sm" href={`/panoramas/new?event_id=${eventId}`}>Back to Wizard</Link>
       </div>
       <h1 className="text-2xl font-semibold mb-4">Create Panorama Manually</h1>
       <form onSubmit={onCreate} className="space-y-4">

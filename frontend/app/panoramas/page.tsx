@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 type Panorama = {
@@ -15,26 +15,30 @@ type Panorama = {
 };
 
 export default function PanoramasListPage() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const eventId = searchParams.get("event_id");
   const [items, setItems] = useState<Panorama[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Redirect to home if no event_id is provided
+    if (!eventId) {
+      router.replace("/");
+      return;
+    }
+
     let mounted = true;
     const load = async () => {
       const { data: sessionData } = await supabase.auth.getSession();
       if (!sessionData.session) return;
       
-      let query = supabase
+      const { data, error } = await supabase
         .from("panoramas")
-        .select("id,name,status,type,event_id,updated_at");
+        .select("id,name,status,type,event_id,updated_at")
+        .eq("event_id", eventId)
+        .order("updated_at", { ascending: false });
       
-      if (eventId) {
-        query = query.eq("event_id", eventId);
-      }
-      
-      const { data, error } = await query.order("updated_at", { ascending: false });
       if (error) console.error(error);
       if (!mounted) return;
       setItems((data as Panorama[]) ?? []);
@@ -44,7 +48,7 @@ export default function PanoramasListPage() {
     return () => {
       mounted = false;
     };
-  }, [eventId]);
+  }, [eventId, router]);
 
   if (loading) {
     return (
@@ -55,16 +59,23 @@ export default function PanoramasListPage() {
     );
   }
 
+  if (!eventId) {
+    return null; // Will redirect
+  }
+
   return (
     <main className="mx-auto max-w-4xl p-6">
+      <div className="mb-4">
+        <Link className="underline text-sm" href={`/events/${eventId}`}>Back to Event</Link>
+      </div>
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-2xl font-semibold">Panoramas</h1>
-        <Link className="underline" href="/panoramas/new">New</Link>
+        <Link className="underline" href={`/panoramas/new?event_id=${eventId}`}>New</Link>
       </div>
       {items.length === 0 ? (
         <div className="rounded border border-gray-200 dark:border-gray-800 p-6">
           <p className="mb-3">No panoramas yet.</p>
-          <Link className="underline" href="/panoramas/new">Create your first</Link>
+          <Link className="underline" href={`/panoramas/new?event_id=${eventId}`}>Create your first</Link>
         </div>
       ) : (
         <ul className="space-y-2">

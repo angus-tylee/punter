@@ -4,6 +4,9 @@ import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import DataExtractionModal from "@/components/events/DataExtractionModal";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 type WizardStep = 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -19,11 +22,16 @@ type PricingTier = {
   price: string;
 };
 
+type DrinkItem = {
+  id: string;
+  name: string;
+  price: string;
+};
+
 type BarPartner = {
   id: string;
   brand: string;
-  drinks: string[];
-  pricing: string[];
+  drinks: DrinkItem[];
 };
 
 export default function NewEventPage() {
@@ -39,10 +47,18 @@ export default function NewEventPage() {
   const [capacity, setCapacity] = useState("");
   const [venue, setVenue] = useState("");
   const [eventUrl, setEventUrl] = useState("");
+  const [ticketingUrl, setTicketingUrl] = useState("");
+  
+  // Data extraction
+  const [showExtractionModal, setShowExtractionModal] = useState(false);
+  const [extractedData, setExtractedData] = useState<any>(null);
+  const [extracting, setExtracting] = useState(false);
 
   // Step 2: Lineup
   const [lineup, setLineup] = useState<LineupItem[]>([]);
   const [newArtist, setNewArtist] = useState("");
+  const [draggedItemId, setDraggedItemId] = useState<string | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   // Step 3: Pricing
   const [pricingTiers, setPricingTiers] = useState<PricingTier[]>([]);
@@ -55,8 +71,9 @@ export default function NewEventPage() {
   // Step 4: Bar Partners
   const [barPartners, setBarPartners] = useState<BarPartner[]>([]);
   const [newBrand, setNewBrand] = useState("");
-  const [newDrinks, setNewDrinks] = useState("");
-  const [newPricing, setNewPricing] = useState("");
+  const [newDrinkName, setNewDrinkName] = useState("");
+  const [newDrinkPrice, setNewDrinkPrice] = useState("");
+  const [currentPartnerDrinks, setCurrentPartnerDrinks] = useState<DrinkItem[]>([]);
 
   // Step 5: Target Market
   const [targetMarket, setTargetMarket] = useState("");
@@ -66,11 +83,7 @@ export default function NewEventPage() {
 
   const eventTypeOptions = [
     "Music Festival",
-    "Venue Event",
-    "Concert",
-    "Live Music Event",
-    "Club Night",
-    "Other"
+    "Venue Event"
   ];
 
   const canProceed = () => {
@@ -126,19 +139,47 @@ export default function NewEventPage() {
     setLineup(updated);
   };
 
-  const moveArtist = (id: string, direction: "up" | "down") => {
-    const index = lineup.findIndex(item => item.id === id);
-    if (index === -1) return;
-    if (direction === "up" && index === 0) return;
-    if (direction === "down" && index === lineup.length - 1) return;
+  const handleDragStart = (id: string) => {
+    setDraggedItemId(id);
+  };
+
+  const handleDragOver = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+    setDragOverIndex(index);
+  };
+
+  const handleDragLeave = () => {
+    setDragOverIndex(null);
+  };
+
+  const handleDrop = (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    setDragOverIndex(null);
+
+    if (!draggedItemId) return;
+
+    const dragIndex = lineup.findIndex(item => item.id === draggedItemId);
+    if (dragIndex === -1 || dragIndex === dropIndex) {
+      setDraggedItemId(null);
+      return;
+    }
 
     const newLineup = [...lineup];
-    const newIndex = direction === "up" ? index - 1 : index + 1;
-    [newLineup[index], newLineup[newIndex]] = [newLineup[newIndex], newLineup[index]];
+    const [draggedItem] = newLineup.splice(dragIndex, 1);
+    newLineup.splice(dropIndex, 0, draggedItem);
+
+    // Update ranks
     newLineup.forEach((item, i) => {
       item.rank = i + 1;
     });
+
     setLineup(newLineup);
+    setDraggedItemId(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedItemId(null);
+    setDragOverIndex(null);
   };
 
   const addPricingTier = () => {
@@ -175,23 +216,140 @@ export default function NewEventPage() {
     setVipTiers(vipTiers.filter(tier => tier.id !== id));
   };
 
+  const addDrinkToPartner = () => {
+    if (newDrinkName.trim() && newDrinkPrice.trim()) {
+      const newDrink: DrinkItem = {
+        id: `drink-${Date.now()}`,
+        name: newDrinkName.trim(),
+        price: newDrinkPrice.trim()
+      };
+      setCurrentPartnerDrinks([...currentPartnerDrinks, newDrink]);
+      setNewDrinkName("");
+      setNewDrinkPrice("");
+    }
+  };
+
+  const removeDrinkFromPartner = (id: string) => {
+    setCurrentPartnerDrinks(currentPartnerDrinks.filter(drink => drink.id !== id));
+  };
+
   const addBarPartner = () => {
     if (newBrand.trim()) {
       const newPartner: BarPartner = {
         id: `bar-${Date.now()}`,
         brand: newBrand.trim(),
-        drinks: newDrinks.split(",").map(d => d.trim()).filter(d => d),
-        pricing: newPricing.split(",").map(p => p.trim()).filter(p => p)
+        drinks: [...currentPartnerDrinks]
       };
       setBarPartners([...barPartners, newPartner]);
       setNewBrand("");
-      setNewDrinks("");
-      setNewPricing("");
+      setNewDrinkName("");
+      setNewDrinkPrice("");
+      setCurrentPartnerDrinks([]);
     }
   };
 
   const removeBarPartner = (id: string) => {
     setBarPartners(barPartners.filter(partner => partner.id !== id));
+  };
+
+  const handleExtractData = async () => {
+    setExtracting(true);
+    setError(null);
+    setShowExtractionModal(true);
+    setExtractedData(null);
+
+    try {
+      // Collect URLs (filter out empty ones)
+      const urls = [eventUrl.trim(), ticketingUrl.trim()].filter(url => url.length > 0);
+      
+      if (urls.length === 0) {
+        setError("Please enter at least one URL");
+        setExtracting(false);
+        return;
+      }
+
+      const response = await fetch(`${API_URL}/api/events/extract-data`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ urls }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ detail: "Failed to extract data" }));
+        throw new Error(errorData.detail || "Failed to extract event data");
+      }
+
+      const data = await response.json();
+      setExtractedData(data);
+    } catch (err: any) {
+      setError(err.message || "Failed to extract event data");
+      setExtractedData(null);
+    } finally {
+      setExtracting(false);
+    }
+  };
+
+  const handleConfirmExtraction = (data: any) => {
+    // Populate form fields with extracted data
+    if (data.description) {
+      // Could set as description or use for name if name is empty
+      if (!name.trim()) {
+        // Try to extract event name from description (first sentence or first 50 chars)
+        const firstSentence = data.description.split(/[.!?]/)[0].trim();
+        if (firstSentence.length > 0 && firstSentence.length < 100) {
+          setName(firstSentence);
+        }
+      }
+      // Store description in target_market for now (or add description field later)
+      setTargetMarket(data.description);
+    }
+    
+    if (data.venue) {
+      setVenue(data.venue);
+    }
+    
+    if (data.lineup && data.lineup.length > 0) {
+      const lineupItems: LineupItem[] = data.lineup.map((item: any, index: number) => ({
+        id: `lineup-${Date.now()}-${index}`,
+        name: item.name || "",
+        rank: item.rank || index + 1,
+      }));
+      setLineup(lineupItems);
+    }
+    
+    if (data.pricing_tiers && data.pricing_tiers.length > 0) {
+      const tiers: PricingTier[] = data.pricing_tiers.map((tier: any, index: number) => ({
+        id: `tier-${Date.now()}-${index}`,
+        name: tier.name || "",
+        price: tier.price || "",
+      }));
+      setPricingTiers(tiers);
+    }
+    
+    if (data.vip_info) {
+      setVipEnabled(data.vip_info.enabled || false);
+      if (data.vip_info.tiers && data.vip_info.tiers.length > 0) {
+        const vipTiersList: PricingTier[] = data.vip_info.tiers.map((tier: any, index: number) => ({
+          id: `vip-${Date.now()}-${index}`,
+          name: tier.name || "",
+          price: tier.price || "",
+        }));
+        setVipTiers(vipTiersList);
+      }
+      if (data.vip_info.included && data.vip_info.included.length > 0) {
+        setVipIncluded(data.vip_info.included.join(", "));
+      }
+    }
+    
+    setShowExtractionModal(false);
+    setExtractedData(null);
+  };
+
+  const handleCancelExtraction = () => {
+    setShowExtractionModal(false);
+    setExtractedData(null);
   };
 
   const handleSubmit = async () => {
@@ -221,7 +379,13 @@ export default function NewEventPage() {
           tiers: vipTiers.map(tier => ({ name: tier.name, price: tier.price })),
           included: vipIncluded.split(",").map(i => i.trim()).filter(i => i)
         },
-        bar_partners: barPartners,
+        bar_partners: barPartners.map(partner => ({
+          brand: partner.brand,
+          drinks: partner.drinks.map(drink => ({
+            name: drink.name,
+            price: drink.price
+          }))
+        })),
         target_market: targetMarket.trim() || null,
         current_stage: currentStage,
         promoter_name: "Promoter Name" // Stubbed for now
@@ -354,7 +518,7 @@ export default function NewEventPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium mb-2">Event URL</label>
+              <label className="block text-sm font-medium mb-2">Event Website URL</label>
               <input
                 type="url"
                 value={eventUrl}
@@ -362,7 +526,41 @@ export default function NewEventPage() {
                 className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 outline-none"
                 placeholder="https://example.com/event"
               />
+              <p className="text-xs text-gray-500 mt-1">Main event website (for lineup, description)</p>
             </div>
+            <div>
+              <label className="block text-sm font-medium mb-2">Ticketing/Event Listing URL (Optional)</label>
+              <input
+                type="url"
+                value={ticketingUrl}
+                onChange={(e) => setTicketingUrl(e.target.value)}
+                className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 outline-none"
+                placeholder="https://tickets.example.com/event"
+              />
+              <p className="text-xs text-gray-500 mt-1">Ticketing site (for pricing, venue details)</p>
+            </div>
+            {(eventUrl.trim() || ticketingUrl.trim()) && (
+              <div>
+                <button
+                  type="button"
+                  onClick={handleExtractData}
+                  disabled={extracting}
+                  className="w-full rounded-md bg-black text-white dark:bg-white dark:text-black py-2 px-4 font-medium disabled:opacity-60 flex items-center justify-center gap-2"
+                >
+                  {extracting ? (
+                    <>
+                      <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white dark:border-black"></div>
+                      <span>Extracting...</span>
+                    </>
+                  ) : (
+                    <span>Auto-fill from URL(s)</span>
+                  )}
+                </button>
+                <p className="text-xs text-gray-500 mt-1 text-center">
+                  Extract event description, venue, lineup, and pricing from the URLs above
+                </p>
+              </div>
+            )}
           </div>
         )}
 
@@ -395,30 +593,27 @@ export default function NewEventPage() {
                   {lineup.map((item, index) => (
                     <div
                       key={item.id}
-                      className="flex items-center gap-2 p-2 border border-gray-200 dark:border-gray-800 rounded"
+                      draggable
+                      onDragStart={() => handleDragStart(item.id)}
+                      onDragOver={(e) => handleDragOver(e, index)}
+                      onDragLeave={handleDragLeave}
+                      onDrop={(e) => handleDrop(e, index)}
+                      onDragEnd={handleDragEnd}
+                      className={`flex items-center gap-2 p-2 border rounded cursor-move transition-all ${
+                        draggedItemId === item.id
+                          ? "opacity-50 border-gray-400 dark:border-gray-600"
+                          : dragOverIndex === index
+                          ? "border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20"
+                          : "border-gray-200 dark:border-gray-800"
+                      }`}
                     >
+                      <span className="text-gray-400 dark:text-gray-600 select-none">⋮⋮</span>
                       <span className="text-sm text-gray-500 w-8">#{item.rank}</span>
                       <span className="flex-1">{item.name}</span>
                       <button
                         type="button"
-                        onClick={() => moveArtist(item.id, "up")}
-                        disabled={index === 0}
-                        className="text-sm disabled:opacity-50"
-                      >
-                        ↑
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => moveArtist(item.id, "down")}
-                        disabled={index === lineup.length - 1}
-                        className="text-sm disabled:opacity-50"
-                      >
-                        ↓
-                      </button>
-                      <button
-                        type="button"
                         onClick={() => removeArtist(item.id)}
-                        className="text-sm text-red-500"
+                        className="text-sm text-red-500 hover:text-red-700 dark:hover:text-red-400"
                       >
                         ×
                       </button>
@@ -442,13 +637,16 @@ export default function NewEventPage() {
                   className="flex-1 rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 outline-none"
                   placeholder="Tier name"
                 />
-                <input
-                  type="text"
-                  value={newTierPrice}
-                  onChange={(e) => setNewTierPrice(e.target.value)}
-                  className="w-32 rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 outline-none"
-                  placeholder="Price"
-                />
+                <div className="relative">
+                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                  <input
+                    type="text"
+                    value={newTierPrice}
+                    onChange={(e) => setNewTierPrice(e.target.value)}
+                    className="w-32 rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 pl-6 outline-none"
+                    placeholder="0.00"
+                  />
+                </div>
                 <button
                   type="button"
                   onClick={addPricingTier}
@@ -464,7 +662,7 @@ export default function NewEventPage() {
                       key={tier.id}
                       className="flex items-center justify-between p-2 border border-gray-200 dark:border-gray-800 rounded"
                     >
-                      <span>{tier.name} - {tier.price}</span>
+                      <span>{tier.name} - ${tier.price}</span>
                       <button
                         type="button"
                         onClick={() => removePricingTier(tier.id)}
@@ -521,7 +719,7 @@ export default function NewEventPage() {
                             key={tier.id}
                             className="flex items-center justify-between p-2 border border-gray-200 dark:border-gray-800 rounded"
                           >
-                            <span>{tier.name} - {tier.price}</span>
+                            <span>{tier.name} - ${tier.price}</span>
                             <button
                               type="button"
                               onClick={() => removeVipTier(tier.id)}
@@ -553,57 +751,122 @@ export default function NewEventPage() {
           <div className="space-y-4">
             <div>
               <label className="block text-sm font-medium mb-2">Bar Partners (Optional)</label>
-              <div className="space-y-3 mb-4">
-                <input
-                  type="text"
-                  value={newBrand}
-                  onChange={(e) => setNewBrand(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 outline-none"
-                  placeholder="Brand name"
-                />
-                <input
-                  type="text"
-                  value={newDrinks}
-                  onChange={(e) => setNewDrinks(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 outline-none"
-                  placeholder="Drinks (comma-separated)"
-                />
-                <input
-                  type="text"
-                  value={newPricing}
-                  onChange={(e) => setNewPricing(e.target.value)}
-                  className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 outline-none"
-                  placeholder="Pricing (comma-separated)"
-                />
+              <div className="space-y-4 mb-4">
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Brand Name</label>
+                  <input
+                    type="text"
+                    value={newBrand}
+                    onChange={(e) => setNewBrand(e.target.value)}
+                    className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 outline-none"
+                    placeholder="Brand name"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Add Drinks</label>
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={newDrinkName}
+                      onChange={(e) => setNewDrinkName(e.target.value)}
+                      onKeyPress={(e) => e.key === "Enter" && (e.preventDefault(), addDrinkToPartner())}
+                      className="flex-1 rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 outline-none"
+                      placeholder="Drink name"
+                    />
+                    <div className="relative">
+                      <span className="absolute left-2 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                      <input
+                        type="text"
+                        value={newDrinkPrice}
+                        onChange={(e) => setNewDrinkPrice(e.target.value)}
+                        onKeyPress={(e) => e.key === "Enter" && (e.preventDefault(), addDrinkToPartner())}
+                        className="w-32 rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 pl-6 outline-none"
+                        placeholder="0.00"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={addDrinkToPartner}
+                      className="rounded-md border border-gray-300 dark:border-gray-700 py-2 px-4"
+                    >
+                      Add Drink
+                    </button>
+                  </div>
+                  {currentPartnerDrinks.length > 0 && (
+                    <div className="mt-3 space-y-2">
+                      <div className="text-xs text-gray-500 mb-1">Drinks for this partner:</div>
+                      <div className="border border-gray-200 dark:border-gray-800 rounded overflow-hidden">
+                        <div className="grid grid-cols-[1fr_auto_auto] gap-2 p-2 bg-gray-50 dark:bg-gray-900/50 text-xs font-medium border-b border-gray-200 dark:border-gray-800">
+                          <div>Drink</div>
+                          <div className="text-right">Price</div>
+                          <div></div>
+                        </div>
+                        {currentPartnerDrinks.map((drink) => (
+                          <div
+                            key={drink.id}
+                            className="grid grid-cols-[1fr_auto_auto] gap-2 p-2 border-b border-gray-200 dark:border-gray-800 last:border-b-0 items-center"
+                          >
+                            <div>{drink.name}</div>
+                            <div className="text-right">${drink.price}</div>
+                            <button
+                              type="button"
+                              onClick={() => removeDrinkFromPartner(drink.id)}
+                              className="text-sm text-red-500 hover:text-red-700 dark:hover:text-red-400"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
                 <button
                   type="button"
                   onClick={addBarPartner}
-                  className="rounded-md border border-gray-300 dark:border-gray-700 py-2 px-4"
+                  disabled={!newBrand.trim()}
+                  className="rounded-md border border-gray-300 dark:border-gray-700 py-2 px-4 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Add Partner
                 </button>
               </div>
               {barPartners.length > 0 && (
-                <div className="space-y-2">
+                <div className="space-y-3 mt-6">
+                  <div className="text-sm font-medium mb-2">Added Partners:</div>
                   {barPartners.map((partner) => (
                     <div
                       key={partner.id}
-                      className="p-3 border border-gray-200 dark:border-gray-800 rounded"
+                      className="p-4 border border-gray-200 dark:border-gray-800 rounded"
                     >
-                      <div className="flex items-center justify-between mb-2">
-                        <span className="font-medium">{partner.brand}</span>
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="font-medium text-base">{partner.brand}</span>
                         <button
                           type="button"
                           onClick={() => removeBarPartner(partner.id)}
-                          className="text-sm text-red-500"
+                          className="text-sm text-red-500 hover:text-red-700 dark:hover:text-red-400"
                         >
                           ×
                         </button>
                       </div>
-                      <div className="text-xs text-gray-500">
-                        <div>Drinks: {partner.drinks.join(", ") || "None"}</div>
-                        <div>Pricing: {partner.pricing.join(", ") || "None"}</div>
-                      </div>
+                      {partner.drinks.length > 0 ? (
+                        <div className="border border-gray-200 dark:border-gray-800 rounded overflow-hidden">
+                          <div className="grid grid-cols-[1fr_auto] gap-2 p-2 bg-gray-50 dark:bg-gray-900/50 text-xs font-medium border-b border-gray-200 dark:border-gray-800">
+                            <div>Drink</div>
+                            <div className="text-right">Price</div>
+                          </div>
+                          {partner.drinks.map((drink) => (
+                            <div
+                              key={drink.id}
+                              className="grid grid-cols-[1fr_auto] gap-2 p-2 border-b border-gray-200 dark:border-gray-800 last:border-b-0"
+                            >
+                              <div className="text-sm">{drink.name}</div>
+                              <div className="text-sm text-right">${drink.price}</div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="text-xs text-gray-500">No drinks added</div>
+                      )}
                     </div>
                   ))}
                 </div>
@@ -721,6 +984,15 @@ export default function NewEventPage() {
           )}
         </div>
       </div>
+
+      {/* Data Extraction Modal */}
+      <DataExtractionModal
+        isOpen={showExtractionModal}
+        extractedData={extractedData}
+        onConfirm={handleConfirmExtraction}
+        onCancel={handleCancelExtraction}
+        isLoading={extracting}
+      />
     </main>
   );
 }

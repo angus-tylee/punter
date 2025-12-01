@@ -105,6 +105,14 @@ export default function NewPanoramaPage() {
     })
   );
 
+  // Redirect to home if no event_id is provided
+  useEffect(() => {
+    if (!eventId) {
+      router.replace("/");
+      return;
+    }
+  }, [eventId, router]);
+
   // Load event data if event_id is provided
   useEffect(() => {
     if (!eventId) return;
@@ -333,6 +341,10 @@ export default function NewPanoramaPage() {
     }
   };
 
+  if (!eventId) {
+    return null; // Will redirect
+  }
+
   if (loadingEvent) {
     return (
       <main className="mx-auto max-w-2xl p-6">
@@ -345,7 +357,7 @@ export default function NewPanoramaPage() {
     return (
       <main className="mx-auto max-w-2xl p-6">
         <p className="text-red-500">Event not found</p>
-        <Link href="/events" className="underline text-sm">
+        <Link href="/" className="underline text-sm">
           Back to Events
         </Link>
       </main>
@@ -357,15 +369,9 @@ export default function NewPanoramaPage() {
   return (
     <main className="mx-auto max-w-2xl p-6">
       <div className="mb-4">
-        {eventId ? (
-          <Link className="underline text-sm" href={`/events/${eventId}`}>
-            Back to Event
-          </Link>
-        ) : (
-          <Link className="underline text-sm" href="/panoramas">
-            Back
-          </Link>
-        )}
+        <Link className="underline text-sm" href={`/events/${eventId}`}>
+          Back to Event
+        </Link>
       </div>
 
       <div className="mb-6">
