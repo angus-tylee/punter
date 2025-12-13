@@ -4,9 +4,6 @@ import { useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import DataExtractionModal from "@/components/events/DataExtractionModal";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
 type WizardStep = 1 | 2 | 3 | 4 | 5 | 6;
 
@@ -47,12 +44,6 @@ export default function NewEventPage() {
   const [capacity, setCapacity] = useState("");
   const [venue, setVenue] = useState("");
   const [eventUrl, setEventUrl] = useState("");
-  const [ticketingUrl, setTicketingUrl] = useState("");
-  
-  // Data extraction
-  const [showExtractionModal, setShowExtractionModal] = useState(false);
-  const [extractedData, setExtractedData] = useState<any>(null);
-  const [extracting, setExtracting] = useState(false);
 
   // Step 2: Lineup
   const [lineup, setLineup] = useState<LineupItem[]>([]);
@@ -252,106 +243,6 @@ export default function NewEventPage() {
     setBarPartners(barPartners.filter(partner => partner.id !== id));
   };
 
-  const handleExtractData = async () => {
-    setExtracting(true);
-    setError(null);
-    setShowExtractionModal(true);
-    setExtractedData(null);
-
-    try {
-      // Collect URLs (filter out empty ones)
-      const urls = [eventUrl.trim(), ticketingUrl.trim()].filter(url => url.length > 0);
-      
-      if (urls.length === 0) {
-        setError("Please enter at least one URL");
-        setExtracting(false);
-        return;
-      }
-
-      const response = await fetch(`${API_URL}/api/events/extract-data`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ urls }),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({ detail: "Failed to extract data" }));
-        throw new Error(errorData.detail || "Failed to extract event data");
-      }
-
-      const data = await response.json();
-      setExtractedData(data);
-    } catch (err: any) {
-      setError(err.message || "Failed to extract event data");
-      setExtractedData(null);
-    } finally {
-      setExtracting(false);
-    }
-  };
-
-  const handleConfirmExtraction = (data: any) => {
-    // Populate form fields with extracted data
-    if (data.description) {
-      // Could set as description or use for name if name is empty
-      if (!name.trim()) {
-        // Try to extract event name from description (first sentence or first 50 chars)
-        const firstSentence = data.description.split(/[.!?]/)[0].trim();
-        if (firstSentence.length > 0 && firstSentence.length < 100) {
-          setName(firstSentence);
-        }
-      }
-      // Store description in target_market for now (or add description field later)
-      setTargetMarket(data.description);
-    }
-    
-    if (data.venue) {
-      setVenue(data.venue);
-    }
-    
-    if (data.lineup && data.lineup.length > 0) {
-      const lineupItems: LineupItem[] = data.lineup.map((item: any, index: number) => ({
-        id: `lineup-${Date.now()}-${index}`,
-        name: item.name || "",
-        rank: item.rank || index + 1,
-      }));
-      setLineup(lineupItems);
-    }
-    
-    if (data.pricing_tiers && data.pricing_tiers.length > 0) {
-      const tiers: PricingTier[] = data.pricing_tiers.map((tier: any, index: number) => ({
-        id: `tier-${Date.now()}-${index}`,
-        name: tier.name || "",
-        price: tier.price || "",
-      }));
-      setPricingTiers(tiers);
-    }
-    
-    if (data.vip_info) {
-      setVipEnabled(data.vip_info.enabled || false);
-      if (data.vip_info.tiers && data.vip_info.tiers.length > 0) {
-        const vipTiersList: PricingTier[] = data.vip_info.tiers.map((tier: any, index: number) => ({
-          id: `vip-${Date.now()}-${index}`,
-          name: tier.name || "",
-          price: tier.price || "",
-        }));
-        setVipTiers(vipTiersList);
-      }
-      if (data.vip_info.included && data.vip_info.included.length > 0) {
-        setVipIncluded(data.vip_info.included.join(", "));
-      }
-    }
-    
-    setShowExtractionModal(false);
-    setExtractedData(null);
-  };
-
-  const handleCancelExtraction = () => {
-    setShowExtractionModal(false);
-    setExtractedData(null);
-  };
-
   const handleSubmit = async () => {
     setError(null);
     setLoading(true);
@@ -526,41 +417,7 @@ export default function NewEventPage() {
                 className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 outline-none"
                 placeholder="https://example.com/event"
               />
-              <p className="text-xs text-gray-500 mt-1">Main event website (for lineup, description)</p>
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">Ticketing/Event Listing URL (Optional)</label>
-              <input
-                type="url"
-                value={ticketingUrl}
-                onChange={(e) => setTicketingUrl(e.target.value)}
-                className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 outline-none"
-                placeholder="https://tickets.example.com/event"
-              />
-              <p className="text-xs text-gray-500 mt-1">Ticketing site (for pricing, venue details)</p>
-            </div>
-            {(eventUrl.trim() || ticketingUrl.trim()) && (
-              <div>
-                <button
-                  type="button"
-                  onClick={handleExtractData}
-                  disabled={extracting}
-                  className="w-full rounded-md bg-black text-white dark:bg-white dark:text-black py-2 px-4 font-medium disabled:opacity-60 flex items-center justify-center gap-2"
-                >
-                  {extracting ? (
-                    <>
-                      <div className="inline-block animate-spin rounded-full h-4 w-4 border-b-2 border-white dark:border-black"></div>
-                      <span>Extracting...</span>
-                    </>
-                  ) : (
-                    <span>Auto-fill from URL(s)</span>
-                  )}
-                </button>
-                <p className="text-xs text-gray-500 mt-1 text-center">
-                  Extract event description, venue, lineup, and pricing from the URLs above
-                </p>
-              </div>
-            )}
           </div>
         )}
 
@@ -984,15 +841,6 @@ export default function NewEventPage() {
           )}
         </div>
       </div>
-
-      {/* Data Extraction Modal */}
-      <DataExtractionModal
-        isOpen={showExtractionModal}
-        extractedData={extractedData}
-        onConfirm={handleConfirmExtraction}
-        onCancel={handleCancelExtraction}
-        isLoading={extracting}
-      />
     </main>
   );
 }

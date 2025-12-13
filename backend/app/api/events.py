@@ -3,7 +3,6 @@ from pydantic import BaseModel
 from typing import Optional, List, Dict, Any
 from supabase import create_client, Client
 from app.config import settings
-from app.services.event_scraper import EventScraper
 
 router = APIRouter()
 
@@ -205,50 +204,4 @@ async def delete_event(event_id: str):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=f"Failed to delete event: {str(e)}")
-
-
-class ExtractDataRequest(BaseModel):
-    """Request to extract event data from URL(s)"""
-    urls: List[str]  # Can accept one or multiple URLs
-
-
-@router.post("/events/extract-data")
-async def extract_event_data(request: ExtractDataRequest):
-    """
-    Extract event data from one or more URLs (description, venue, lineup, pricing)
-    
-    Accepts multiple URLs to improve accuracy:
-    - Main event website (better for description, lineup)
-    - Ticketing site (better for pricing, venue details)
-    
-    Uses LLM-based extraction that works with any website.
-    Merges results from multiple URLs intelligently.
-    Returns extracted data for user review before auto-populating form.
-    """
-    try:
-        if not request.urls:
-            raise HTTPException(status_code=400, detail="At least one URL is required")
-        
-        # Initialize scraper
-        scraper = EventScraper()
-        
-        # Extract data from all URLs and merge
-        if len(request.urls) == 1:
-            extracted_data = await scraper.extract_from_url(request.urls[0])
-        else:
-            extracted_data = await scraper.extract_from_urls(request.urls)
-        
-        # Return as dictionary
-        return extracted_data.to_dict()
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        print(f"Error extracting event data: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to extract event data: {str(e)}"
-        )
 
