@@ -2,6 +2,7 @@ import json
 import re
 from pathlib import Path
 from typing import Dict, List, Optional
+from datetime import datetime
 from openai import OpenAI
 from app.config import settings
 from app.services.universal_questions import get_universal_question_texts
@@ -15,6 +16,10 @@ from app.services.pre_event_config import (
     get_survey_constraints,
     format_config_for_prompt,
     is_forbidden_question,
+)
+from app.services.question_strategies import (
+    select_applicable_strategies,
+    format_strategies_for_prompt,
 )
 
 
@@ -91,8 +96,15 @@ class LLMService:
                 # Re-flatten after refinement
                 all_questions = self._flatten_sections(questions_data.get("sections", []))
             
-            # Final validation and normalization (returns flat list for backward compatibility)
-            return self._validate_questions(all_questions)
+            # Step 6: Validate and normalize questions
+            validated_questions = self._validate_questions(all_questions)
+            
+            # Step 7: GUARANTEED post-processing - replace placeholder tokens with real data
+            print("Post-processing: Replacing placeholder tokens with real data...")
+            extracted_data = context_analysis.get("extracted_data", {})
+            final_questions = self._post_process_questions(validated_questions, extracted_data)
+            
+            return final_questions
             
         except Exception as e:
             print(f"Error generating questions: {e}")
@@ -103,8 +115,8 @@ class LLMService:
     
     def _analyze_context(self, context: Dict[str, str]) -> Dict:
         """
-        Analyze context to extract goals and prepare data for question generation.
-        Uses 3-bucket goal system.
+        Analyze context to extract goals, event data, and prepare for question generation.
+        Uses 3-bucket goal system and extracts all event data for placeholder replacement.
         """
         # Get goals from buckets
         must_have_goals = context.get("goals_must_have", [])
@@ -139,6 +151,83 @@ class LLMService:
         # additional_context is for customization only
         additional_context = context.get("additional_context", "")
         
+        # ===========================================
+        # EXTRACT EVENT DATA FOR PLACEHOLDER TOKENS
+        # ===========================================
+        event_data = context.get("event", {})
+        
+        # Extract lineup data
+        lineup = event_data.get("lineup", [])
+        artist_names = [a.get("name") for a in lineup if a.get("name")]
+        # Headliner: rank=1 or first artist
+        headliner = next(
+            (a.get("name") for a in lineup if a.get("rank") == 1),
+            artist_names[0] if artist_names else None
+        )
+        
+        # Extract pricing data
+        pricing = event_data.get("pricing_tiers", [])
+        pricing_formatted = [
+            f"{t.get('name')} (${t.get('price', 0)})" 
+            for t in pricing if t.get("name")
+        ]
+        
+        # Extract VIP data
+        vip_info = event_data.get("vip_info", {})
+        vip_perks = vip_info.get("included", []) if vip_info.get("enabled") else []
+        
+        # Extract bar partner data
+        bar_partners = event_data.get("bar_partners", [])
+        bar_brands = [b.get("brand") for b in bar_partners if b.get("brand")]
+        
+        # Extract venue and date
+        venue = event_data.get("venue")
+        date_raw = event_data.get("date")
+        date_formatted = None
+        if date_raw:
+            try:
+                dt = datetime.fromisoformat(str(date_raw).replace('Z', '+00:00'))
+                date_formatted = dt.strftime("%A, %B %d")  # "Saturday, July 15"
+            except:
+                date_formatted = str(date_raw)
+        
+        # Build available_data dict (for strategy selection)
+        available_data = {
+            "lineup": bool(artist_names),
+            "headliner": bool(headliner),
+            "pricing_tiers": bool(pricing_formatted),
+            "vip_info": bool(vip_perks),
+            "bar_partners": bool(bar_brands),
+            "venue": bool(venue),
+            "date": bool(date_raw),
+        }
+        
+        # Build extracted_data dict (for placeholder replacement)
+        extracted_data = {
+            "event_name": event_name,
+            "lineup_artists": artist_names,
+            "headliner": headliner,
+            "pricing_tiers_formatted": pricing_formatted,
+            "vip_perks": vip_perks,
+            "bar_brands": bar_brands,
+            "venue": venue,
+            "date_formatted": date_formatted,
+        }
+        
+        # ===========================================
+        # SELECT STRATEGIES FOR GOALS
+        # ===========================================
+        goal_strategies = {}
+        all_goals = must_have_goals + interested_goals
+        for goal in all_goals:
+            strategies = select_applicable_strategies(goal, available_data, max_strategies=4)
+            goal_strategies[goal] = strategies
+        
+        # Format strategies for prompt
+        strategy_instructions = format_strategies_for_prompt(
+            goal_strategies, extracted_data, must_have_goals, interested_goals
+        )
+        
         return {
             "additional_context": additional_context,
             "event_type": context.get("event_type", ""),
@@ -155,34 +244,25 @@ class LLMService:
             "required_questions": required_questions,
             # Pre-event rules
             "pre_event_rules": pre_event_rules,
+            # NEW: Event data for placeholders
+            "available_data": available_data,
+            "extracted_data": extracted_data,
+            "goal_strategies": goal_strategies,
+            "strategy_instructions": strategy_instructions,
         }
     
     def _build_prompt(self, context: Dict[str, str], context_analysis: Dict) -> str:
-        """Build the prompt for question generation using 3-bucket goal system"""
-        # Format goals by bucket with question counts
-        must_have = context_analysis.get("must_have_goals", [])
-        interested = context_analysis.get("interested_goals", [])
+        """Build the prompt for question generation using strategy-based approach with placeholder tokens"""
         
-        focus_areas_text = "GOAL PRIORITIES (generate questions accordingly):\n\n"
+        # Get strategy instructions (contains all goal-strategy mappings with tokens)
+        strategy_instructions = context_analysis.get("strategy_instructions", "")
         
-        if must_have:
-            focus_areas_text += "MUST HAVE (4 questions per goal):\n"
-            for goal in must_have:
-                focus_areas_text += f"  - {goal}\n"
-        
-        if interested:
-            focus_areas_text += "\nINTERESTED TO KNOW (2 questions per goal):\n"
-            for goal in interested:
-                focus_areas_text += f"  - {goal}\n"
-        
-        if not must_have and not interested:
-            focus_areas_text += "No specific goals provided - generate general pre-event survey questions.\n"
-        
-        focus_areas_text += f"\nTARGET TOTAL: {context_analysis.get('target_question_count', 15)} questions"
+        # Get extracted data for preview in prompt
+        extracted_data = context_analysis.get("extracted_data", {})
         
         # Format the template with context variables
         prompt = self._question_prompt_template.format(
-            focus_areas=focus_areas_text,
+            focus_areas=strategy_instructions,
             event_type=context_analysis.get('event_type', 'Music Festival'),
             event_name=context_analysis.get('event_name', 'Untitled Event'),
             audience=context_analysis.get('audience', 'Attendees'),
@@ -194,12 +274,6 @@ class LLMService:
         pre_event_rules = context_analysis.get("pre_event_rules", "")
         if pre_event_rules:
             prompt += f"\n\n{pre_event_rules}"
-        
-        # Add question bank examples as inspiration
-        question_bank_prompt = context_analysis.get("question_bank_prompt", "")
-        if question_bank_prompt:
-            prompt += "\n\nQUESTION BANK (use these as inspiration, adapt and personalize for the event):\n"
-            prompt += question_bank_prompt
         
         # Add required questions that MUST be included
         required_questions_prompt = context_analysis.get("required_questions_prompt", "")
@@ -433,31 +507,35 @@ class LLMService:
         universal_question_texts = get_universal_question_texts()
         universal_texts_lower = [q.lower() for q in universal_question_texts]
         
-        # Keywords to detect demographic questions
-        demographic_keywords = [
-            "name", "email", "phone", "age", "location", "occupation", "demographic",
-            "where did you grow up", "where do you live", "home base", "grow up", "currently live"
+        # Phrases to detect demographic questions (more specific to avoid false positives)
+        demographic_phrases = [
+            "your name", "your email", "your phone", "your age", 
+            "email address", "phone number",
+            "how old are you", "what is your age",
+            "where do you live", "where did you grow up", 
+            "home base", "currently live", "your location",
+            "your occupation", "what do you do for work",
         ]
-        
+
         for i, q in enumerate(questions):
             if not isinstance(q, dict):
                 continue
-            
+
             question_text = q.get("question_text", "").strip()
             if not question_text:
                 continue
-            
+
             # Post-processing filter: check for demographic questions
             question_text_lower = question_text.lower()
-            
+
             # Check for exact matches with universal questions
             if question_text_lower in universal_texts_lower:
                 print(f"Warning: Removed duplicate demographic question: {question_text}")
                 continue
-            
-            # Check for keyword matches
-            if any(keyword in question_text_lower for keyword in demographic_keywords):
-                print(f"Warning: Removed demographic question (keyword match): {question_text}")
+
+            # Check for demographic phrase matches (more specific than single keywords)
+            if any(phrase in question_text_lower for phrase in demographic_phrases):
+                print(f"Warning: Removed demographic question (phrase match): {question_text}")
                 continue
             
             # Check for forbidden patterns (post-event questions in pre-event survey)
@@ -493,6 +571,116 @@ class LLMService:
             })
         
         return validated
+    
+    def _post_process_questions(self, questions: List[Dict], extracted_data: Dict) -> List[Dict]:
+        """
+        GUARANTEED data injection - replaces ALL placeholder tokens with real data.
+        This runs on every question regardless of what the LLM did.
+        
+        Args:
+            questions: List of question dictionaries from _validate_questions
+            extracted_data: Dict with real event data for replacement
+        
+        Returns:
+            List of questions with all tokens replaced with real data
+        """
+        processed = []
+        
+        for q in questions:
+            q = q.copy()
+            
+            # 1. Replace tokens in question text
+            text = q.get("question_text", "")
+            text = self._replace_text_tokens(text, extracted_data)
+            q["question_text"] = text
+            
+            # 2. Replace/expand tokens in options
+            if q.get("options"):
+                q["options"] = self._replace_option_tokens(q["options"], extracted_data)
+            
+            processed.append(q)
+        
+        return processed
+    
+    def _replace_text_tokens(self, text: str, data: Dict) -> str:
+        """Replace text-based placeholder tokens with actual values."""
+        if not text:
+            return text
+        
+        # Define replacements - token to data key mapping
+        replacements = {
+            "{{EVENT_NAME}}": data.get("event_name", "the event"),
+            "{{HEADLINER}}": data.get("headliner"),
+            "{{VENUE}}": data.get("venue"),
+            "{{EVENT_DATE}}": data.get("date_formatted"),
+        }
+        
+        # Handle VIP_PERKS specially - it's a list that needs joining
+        vip_perks = data.get("vip_perks", [])
+        if vip_perks:
+            replacements["{{VIP_PERKS}}"] = ", ".join(vip_perks[:4])
+        else:
+            replacements["{{VIP_PERKS}}"] = "exclusive perks"
+        
+        # Perform replacements
+        for token, value in replacements.items():
+            if token in text:
+                if value:
+                    text = text.replace(token, str(value))
+                else:
+                    # If no data, use a sensible fallback
+                    fallbacks = {
+                        "{{EVENT_NAME}}": "the event",
+                        "{{HEADLINER}}": "the headliner",
+                        "{{VENUE}}": "the venue",
+                        "{{EVENT_DATE}}": "the event date",
+                        "{{VIP_PERKS}}": "exclusive perks",
+                    }
+                    text = text.replace(token, fallbacks.get(token, ""))
+        
+        return text
+    
+    def _replace_option_tokens(self, options: List[str], data: Dict) -> List[str]:
+        """
+        Expand option placeholder tokens into actual data.
+        
+        If options = ["{{LINEUP_ARTISTS}}", "All equally", "Other"]
+        And lineup_artists = ["Beyoncé", "Drake", "Taylor Swift"]
+        Returns: ["Beyoncé", "Drake", "Taylor Swift", "All equally", "Other"]
+        """
+        if not options:
+            return options
+        
+        # Token to data mapping for options that expand to lists
+        token_to_data = {
+            "{{LINEUP_ARTISTS}}": data.get("lineup_artists", []),
+            "{{PRICING_TIERS}}": data.get("pricing_tiers_formatted", []),
+            "{{BAR_BRANDS}}": data.get("bar_brands", []),
+        }
+        
+        expanded = []
+        
+        for opt in options:
+            if opt in token_to_data:
+                # Expand token to actual list items
+                items = token_to_data[opt]
+                if items and isinstance(items, list):
+                    # Add up to 6 items from the data
+                    expanded.extend(items[:6])
+                # If no data, skip the token entirely (don't include it as literal text)
+            else:
+                # Keep static options as-is (but also replace any text tokens in them)
+                expanded.append(self._replace_text_tokens(opt, data))
+        
+        # Remove any empty strings and duplicates while preserving order
+        seen = set()
+        final_options = []
+        for opt in expanded:
+            if opt and opt not in seen:
+                seen.add(opt)
+                final_options.append(opt)
+        
+        return final_options if final_options else options  # Fallback to original if empty
     
     def _get_fallback_questions(self, context: Dict[str, str]) -> List[Dict]:
         """Return pre-event appropriate fallback questions if LLM fails"""

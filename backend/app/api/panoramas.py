@@ -120,14 +120,23 @@ async def generate_panorama_from_context(
             "goals_not_important": context.goals_not_important,
         }
         
-        # Add event data if available
+        # Add event data if available - pass ALL fields for personalization
         if event_data:
             context_dict["event"] = {
+                # Lineup data
                 "lineup": event_data.get("lineup", []),
+                # Pricing data
                 "pricing_tiers": event_data.get("pricing_tiers", []),
+                "vip_info": event_data.get("vip_info", {}),
+                # Venue & logistics
                 "venue": event_data.get("venue"),
+                "date": event_data.get("date"),
+                "capacity": event_data.get("capacity"),
+                # Partners & sponsors
+                "bar_partners": event_data.get("bar_partners", []),
+                # Meta
+                "promoter_name": event_data.get("promoter_name"),
                 "target_market": event_data.get("target_market"),
-                "current_stage": event_data.get("current_stage")
             }
         
         try:

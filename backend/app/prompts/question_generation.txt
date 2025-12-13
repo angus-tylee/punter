@@ -1,4 +1,4 @@
-Generate a PRE-EVENT survey based on the organizer's prioritized goals.
+EXECUTE these question strategies for {{EVENT_NAME}}:
 
 {focus_areas}
 
@@ -9,42 +9,55 @@ Target Audience: {audience}
 Event Timing: {timing}
 Additional Context: {additional_context}
 
-QUESTION GENERATION RULES:
-1. For MUST HAVE goals: Generate exactly 4 questions per goal
-2. For INTERESTED TO KNOW goals: Generate exactly 2 questions per goal
-3. Include ALL required questions provided below
-4. Use question bank examples as inspiration - adapt wording for this specific event
-5. Questions must be PRE-EVENT focused (expectations, preferences, plans)
+EXECUTION RULES:
+1. For each strategy provided above, generate ONE question following the template
+2. Use placeholder tokens EXACTLY as shown (e.g., {{LINEUP_ARTISTS}}, {{HEADLINER}})
+3. The system will automatically replace tokens with real data - DO NOT replace them yourself
+4. Keep static options (like "Other", "Undecided", "All equally") alongside tokens
+5. Ensure question count matches requirements per goal
+6. All questions must be PRE-EVENT focused (expectations, preferences, plans)
 
-QUESTION TYPE GUIDELINES:
-- Likert scale: Use for agreement/excitement levels (5-point: Strongly Disagree, Disagree, Neutral, Agree, Strongly Agree)
-- Single-select: Use for questions with mutually exclusive options
-- Multi-select: Use for questions where multiple options can apply
-- Text/Textarea: Use for open-ended questions about expectations or preferences
+TOKEN USAGE IN OPTIONS:
 
-PRE-EVENT QUESTION EXAMPLES:
-- "What are you most looking forward to at [event]?"
-- "How excited are you about attending [event]?"
-- "What would make this event a success for you?"
-- "How are you planning to get to [event]?"
-- "What information would be most helpful before the event?"
+When the template shows options like: ["{{LINEUP_ARTISTS}}", "All equally", "Other"]
+Output EXACTLY: ["{{LINEUP_ARTISTS}}", "All equally excited", "Other"]
+
+The system will expand {{LINEUP_ARTISTS}} to actual artist names automatically.
+
+TOKEN USAGE IN QUESTION TEXT:
+
+When the template shows: "How much did {{HEADLINER}} influence your decision?"
+Output with the token: "How much did {{HEADLINER}} headlining influence your decision to attend {{EVENT_NAME}}?"
+
+The system will replace {{HEADLINER}} with the actual headliner name automatically.
 
 Return a JSON object with this exact structure:
 {{
   "sections": [
     {{
-      "section_name": "Expectations & Excitement",
+      "section_name": "Lineup & Artist Excitement",
       "questions": [
         {{
-          "question_text": "What are you most looking forward to at {event_name}?",
+          "question_text": "Which artists are you most excited to see at {{EVENT_NAME}}?",
           "question_type": "Multi-select",
-          "options": ["Music performances", "Meeting new people", "Food & drinks", "Overall atmosphere", "Discovering new artists"],
+          "options": ["{{LINEUP_ARTISTS}}", "All equally excited", "Other"],
           "required": true
         }},
         {{
-          "question_text": "How excited are you about attending {event_name}?",
+          "question_text": "How much did {{HEADLINER}} headlining influence your decision to attend {{EVENT_NAME}}?",
           "question_type": "Likert",
-          "options": ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"],
+          "options": ["Not at all", "Slightly", "Moderately", "Significantly", "It was the main reason"],
+          "required": true
+        }}
+      ]
+    }},
+    {{
+      "section_name": "Ticket & Pricing",
+      "questions": [
+        {{
+          "question_text": "Which ticket option best fits your needs for {{EVENT_NAME}}?",
+          "question_type": "Single-select",
+          "options": ["{{PRICING_TIERS}}", "Undecided"],
           "required": true
         }}
       ]
@@ -53,9 +66,10 @@ Return a JSON object with this exact structure:
 }}
 
 IMPORTANT:
-- question_type must be one of: "text", "textarea", "Single-select", "Multi-select", "Likert"
+- Use question_type values exactly: "Likert", "Single-select", "Multi-select", "text", "textarea"
 - For Single-select, Multi-select, and Likert, provide options array
-- For Likert, always use: ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"]
+- For Likert, always use: ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"] OR the scale shown in the strategy template
 - For text and textarea, set options to null
 - Organize questions into logical sections by topic
+- Include placeholder tokens in options arrays where specified in strategies
 - Return valid JSON only, no markdown formatting
