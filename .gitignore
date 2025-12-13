@@ -26,6 +26,7 @@ ENV/
 *.swp
 *.swo
 *~
+.cursor/
 
 # Next.js
 .next/
