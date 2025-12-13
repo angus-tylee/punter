@@ -23,14 +23,19 @@ class PanoramaContext(BaseModel):
     panorama_type: Optional[str] = None  # 'plan', 'pulse', or 'playback'
     event_type: str
     event_name: str
-    goals: List[str]
+    
+    # 3-bucket goal prioritization
+    # Must Have: Max 3 goals, gets 4 questions per goal
+    goals_must_have: List[str] = []
+    # Interested to Know: Gets 2 questions per goal
+    goals_interested: List[str] = []
+    # Not Important: Gets 0 questions (unless filling gaps)
+    goals_not_important: List[str] = []
+    
     learning_objectives: str
     audience: str
     timing: str
     additional_context: Optional[str] = None
-    high_level_questions: Optional[str] = None
-    low_level_questions: Optional[str] = None
-    survey_length: Optional[int] = None
 
 
 class StagingQuestion(BaseModel):
@@ -94,18 +99,25 @@ async def generate_panorama_from_context(
                 print(f"Warning: Could not load event data: {e}")
         
         # Generate questions using LLM
+        # Validate max 3 goals in must_have bucket
+        if len(context.goals_must_have) > 3:
+            raise HTTPException(
+                status_code=400, 
+                detail="Maximum 3 goals allowed in 'Must Have' bucket"
+            )
+        
         context_dict = {
             "event_type": context.event_type,
             "event_name": context.event_name,
-            "goals": context.goals,
             "learning_objectives": context.learning_objectives,
             "audience": context.audience,
             "timing": context.timing,
             "additional_context": context.additional_context or "",
             "panorama_type": context.panorama_type,
-            "high_level_questions": context.high_level_questions or "",
-            "low_level_questions": context.low_level_questions or "",
-            "survey_length": context.survey_length
+            # 3-bucket goals
+            "goals_must_have": context.goals_must_have,
+            "goals_interested": context.goals_interested,
+            "goals_not_important": context.goals_not_important,
         }
         
         # Add event data if available

@@ -1,6 +1,6 @@
-You are a survey question refinement expert. Your task is to improve a set of survey questions based on specific validation feedback.
+You are a pre-event survey refinement expert. Fix issues identified in validation feedback.
 
-ORIGINAL QUESTIONS (with sections):
+ORIGINAL QUESTIONS:
 {original_questions}
 
 VALIDATION FEEDBACK:
@@ -9,27 +9,41 @@ VALIDATION FEEDBACK:
 REFINEMENT INSTRUCTIONS:
 {refinement_instructions}
 
-USER FOCUS AREAS THAT MUST BE COVERED:
+GOALS THAT MUST BE COVERED:
 {context_topics}
 
-INSTRUCTIONS:
-- Fix all issues identified in the validation feedback
-- Ensure ALL user focus areas are expanded into sections with multiple questions
-- Add best practice questions to fill gaps (logistics, safety, marketing, overall experience)
+FIX THESE ISSUES:
+1. GOAL COVERAGE: Add questions for any goals that don't have enough
+   - MUST HAVE goals need 4 questions each
+   - INTERESTED TO KNOW goals need 2 questions each
+
+2. REQUIRED QUESTIONS: Add any missing required questions
+   - Accessibility question
+   - Catch-all open-ended question
+
+3. PRE-EVENT APPROPRIATENESS: Remove or rewrite any post-event questions
+   - Replace "How satisfied were you..." with "How excited are you about..."
+   - Replace "What did you like..." with "What are you looking forward to..."
+   - All questions must be forward-looking
+
+4. FORMATTING: Fix any structural issues
+
+RULES:
 - Keep questions that are already good - only modify or add what's needed
 - Maintain section organization
-- Do not create questions about demographics (name, email, phone, age, location, occupation)
+- Do NOT create demographic questions (name, email, phone, age, location, occupation)
+- All questions must be PRE-EVENT focused
 
 Return a JSON object with this exact structure:
 {{
   "sections": [
     {{
-      "section_name": "Lineup & Music Experience",
+      "section_name": "Expectations & Excitement",
       "questions": [
         {{
-          "question_text": "How satisfied were you with the overall music lineup?",
-          "question_type": "Likert",
-          "options": ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"],
+          "question_text": "What are you most looking forward to?",
+          "question_type": "Multi-select",
+          "options": ["Music performances", "Meeting new people", "Food & drinks"],
           "required": true
         }}
       ]
@@ -43,4 +57,3 @@ IMPORTANT:
 - For Likert, always use: ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"]
 - For text and textarea, set options to null
 - Return valid JSON only, no markdown formatting
-- Maintain sections structure

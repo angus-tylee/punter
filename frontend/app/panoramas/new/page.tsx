@@ -6,20 +6,17 @@ import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import {
   DndContext,
+  DragOverlay,
   closestCenter,
   KeyboardSensor,
   PointerSensor,
   useSensor,
   useSensors,
+  DragStartEvent,
   DragEndEvent,
+  useDroppable,
+  useDraggable,
 } from "@dnd-kit/core";
-import {
-  arrayMove,
-  SortableContext,
-  sortableKeyboardCoordinates,
-  useSortable,
-  verticalListSortingStrategy,
-} from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -29,6 +26,14 @@ type WizardStep = 1 | 2 | 3;
 type Goal = {
   id: string;
   text: string;
+};
+
+type BucketKey = "must_have" | "interested" | "not_important";
+
+type GoalBuckets = {
+  must_have: Goal[];
+  interested: Goal[];
+  not_important: Goal[];
 };
 
 type PanoramaType = "plan" | "pulse" | "playback";
@@ -43,31 +48,137 @@ type Event = {
   target_market: string | null;
 };
 
-function SortableGoalItem({ goal, onRemove }: { goal: Goal; onRemove: (id: string) => void }) {
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id: goal.id });
+// Draggable goal item
+function DraggableGoal({ goal, onRemove }: { goal: Goal; onRemove: (id: string) => void }) {
+  const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
+    id: goal.id,
+  });
 
   const style = {
-    transform: CSS.Transform.toString(transform),
-    transition,
+    transform: CSS.Translate.toString(transform),
+    opacity: isDragging ? 0.5 : 1,
   };
 
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className="flex items-center gap-2 p-3 border border-gray-200 dark:border-gray-800 rounded bg-white dark:bg-gray-900"
+      className="flex items-center gap-2 p-3 border border-gray-200 dark:border-gray-700 rounded bg-white dark:bg-gray-900 cursor-grab active:cursor-grabbing"
+      {...listeners}
+      {...attributes}
     >
-      <div {...attributes} {...listeners} className="cursor-grab active:cursor-grabbing">
-        ⋮⋮
-      </div>
-      <span className="flex-1">{goal.text}</span>
+      <span className="text-gray-400 mr-1">⋮⋮</span>
+      <span className="flex-1 text-sm">{goal.text}</span>
       <button
         type="button"
-        onClick={() => onRemove(goal.id)}
-        className="text-red-500 hover:text-red-700"
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove(goal.id);
+        }}
+        className="text-xs px-2 py-1 rounded bg-red-100 dark:bg-red-900 text-red-600 dark:text-red-400 hover:bg-red-200"
       >
         ×
       </button>
+    </div>
+  );
+}
+
+// Static goal display for overlay
+function GoalOverlay({ goal }: { goal: Goal }) {
+  return (
+    <div className="flex items-center gap-2 p-3 border-2 border-black dark:border-white rounded bg-white dark:bg-gray-900 shadow-lg cursor-grabbing">
+      <span className="text-gray-400 mr-1">⋮⋮</span>
+      <span className="flex-1 text-sm">{goal.text}</span>
+    </div>
+  );
+}
+
+// Droppable bucket
+function DroppableBucket({
+  bucketKey,
+  title,
+  description,
+  questionsPerGoal,
+  goals,
+  onRemove,
+  maxReached,
+  isOver,
+  canDrop,
+}: {
+  bucketKey: BucketKey;
+  title: string;
+  description: string;
+  questionsPerGoal: number;
+  goals: Goal[];
+  onRemove: (id: string) => void;
+  maxReached?: boolean;
+  isOver: boolean;
+  canDrop: boolean;
+}) {
+  const { setNodeRef } = useDroppable({
+    id: bucketKey,
+  });
+
+  const totalQuestions = goals.length * questionsPerGoal;
+
+  const getBucketStyles = () => {
+    const base = bucketKey === "must_have"
+      ? "border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-950"
+      : bucketKey === "interested"
+      ? "border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950"
+      : "border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-gray-950";
+
+    if (isOver && canDrop) {
+      return bucketKey === "must_have"
+        ? "border-green-500 dark:border-green-400 bg-green-100 dark:bg-green-900 ring-2 ring-green-400"
+        : bucketKey === "interested"
+        ? "border-blue-500 dark:border-blue-400 bg-blue-100 dark:bg-blue-900 ring-2 ring-blue-400"
+        : "border-gray-500 dark:border-gray-400 bg-gray-100 dark:bg-gray-900 ring-2 ring-gray-400";
+    }
+
+    if (isOver && !canDrop) {
+      return "border-red-400 bg-red-50 dark:bg-red-950 ring-2 ring-red-400";
+    }
+
+    return base;
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      className={`p-4 rounded-lg border-2 transition-all duration-200 min-h-[120px] ${getBucketStyles()}`}
+    >
+      <div className="flex justify-between items-start mb-3">
+        <div>
+          <h3 className="font-semibold">{title}</h3>
+          <p className="text-xs text-gray-600 dark:text-gray-400">{description}</p>
+        </div>
+        <div className="text-right">
+          <span className="text-sm font-medium">
+            {goals.length} goal{goals.length !== 1 ? "s" : ""}
+          </span>
+          {questionsPerGoal > 0 && (
+            <p className="text-xs text-gray-500">
+              → {totalQuestions} question{totalQuestions !== 1 ? "s" : ""}
+            </p>
+          )}
+          {maxReached && (
+            <p className="text-xs text-orange-600 dark:text-orange-400">Max reached</p>
+          )}
+        </div>
+      </div>
+
+      {goals.length === 0 ? (
+        <div className="text-sm text-gray-400 italic py-4 text-center border-2 border-dashed border-gray-300 dark:border-gray-600 rounded">
+          Drag goals here
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {goals.map((goal) => (
+            <DraggableGoal key={goal.id} goal={goal} onRemove={onRemove} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -87,22 +198,27 @@ export default function NewPanoramaPage() {
   const [selectedType, setSelectedType] = useState<PanoramaType | null>(null);
   const [typeDescriptions, setTypeDescriptions] = useState<Record<string, any>>({});
 
-  // Step 2: Goals
-  const [goals, setGoals] = useState<Goal[]>([]);
+  // Step 2: Goal Buckets (3-bucket system)
+  const [goalBuckets, setGoalBuckets] = useState<GoalBuckets>({
+    must_have: [],
+    interested: [],
+    not_important: [],
+  });
   const [loadingGoals, setLoadingGoals] = useState(false);
+  const [activeGoal, setActiveGoal] = useState<Goal | null>(null);
+  const [activeBucket, setActiveBucket] = useState<BucketKey | null>(null);
 
   // Step 3: Additional Context
-  const [highLevelQuestions, setHighLevelQuestions] = useState("");
-  const [lowLevelQuestions, setLowLevelQuestions] = useState("");
-  const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
-  const [surveyLength, setSurveyLength] = useState<number>(25);
+  const [additionalContext, setAdditionalContext] = useState("");
 
+  // DnD sensors
   const sensors = useSensors(
-    useSensor(PointerSensor),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8,
+      },
+    }),
+    useSensor(KeyboardSensor)
   );
 
   // Redirect to home if no event_id is provided
@@ -143,17 +259,8 @@ export default function NewPanoramaPage() {
       setEvent(data as Event);
       setLoadingEvent(false);
 
-      // Determine suggested panorama type based on stage
-      if (data) {
-        const stage = data.current_stage;
-        if (stage === "early_planning") {
-          setSelectedType("plan");
-        } else if (stage === "mid_campaign") {
-          setSelectedType("pulse");
-        } else if (stage === "post_event") {
-          setSelectedType("playback");
-        }
-      }
+      // Always default to "plan" type for MVP (pulse/playback disabled)
+      setSelectedType("plan");
     };
 
     void loadEvent();
@@ -176,7 +283,14 @@ export default function NewPanoramaPage() {
         const data = await response.json();
         if (!mounted) return;
 
-        setGoals(data.goals || []);
+        // Initialize all goals in "interested" bucket by default
+        const allGoals: Goal[] = data.goals || [];
+        setGoalBuckets({
+          must_have: [],
+          interested: allGoals,
+          not_important: [],
+        });
+
         setTypeDescriptions({
           [selectedType]: data.description,
         });
@@ -195,55 +309,80 @@ export default function NewPanoramaPage() {
     };
   }, [selectedType]);
 
-  // Load suggestions when moving to step 3
-  useEffect(() => {
-    if (currentStep === 3 && eventId && selectedType) {
-      loadSuggestions();
+  // Find which bucket contains a goal
+  const findGoalBucket = (goalId: string): BucketKey | null => {
+    for (const bucket of ["must_have", "interested", "not_important"] as BucketKey[]) {
+      if (goalBuckets[bucket].some((g) => g.id === goalId)) {
+        return bucket;
+      }
     }
-  }, [currentStep, eventId, selectedType]);
+    return null;
+  };
 
-  const loadSuggestions = async () => {
-    if (!eventId || !selectedType) return;
-
-    setLoadingSuggestions(true);
-    try {
-      const response = await fetch(`${API_URL}/api/panoramas/suggest-context`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          event_id: eventId,
-          panorama_type: selectedType,
-          high_level_questions: highLevelQuestions,
-          low_level_questions: lowLevelQuestions,
-        }),
-      });
-
-      if (!response.ok) throw new Error("Failed to load suggestions");
-
-      const data = await response.json();
-      setSuggestions(data.suggestions || []);
-    } catch (err: any) {
-      console.error(err);
-      // Don't show error, just continue without suggestions
-    } finally {
-      setLoadingSuggestions(false);
+  // Handle drag start
+  const handleDragStart = (event: DragStartEvent) => {
+    const goalId = event.active.id as string;
+    const bucket = findGoalBucket(goalId);
+    if (bucket) {
+      const goal = goalBuckets[bucket].find((g) => g.id === goalId);
+      setActiveGoal(goal || null);
+      setActiveBucket(bucket);
     }
   };
 
+  // Handle drag end
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
+    setActiveGoal(null);
+    setActiveBucket(null);
 
-    if (over && active.id !== over.id) {
-      setGoals((items) => {
-        const oldIndex = items.findIndex((item) => item.id === active.id);
-        const newIndex = items.findIndex((item) => item.id === over.id);
-        return arrayMove(items, oldIndex, newIndex);
-      });
+    if (!over) return;
+
+    const goalId = active.id as string;
+    const targetBucket = over.id as BucketKey;
+    const sourceBucket = findGoalBucket(goalId);
+
+    if (!sourceBucket || sourceBucket === targetBucket) return;
+
+    // Check max 3 for must_have
+    if (targetBucket === "must_have" && goalBuckets.must_have.length >= 3) {
+      return;
+    }
+
+    const goal = goalBuckets[sourceBucket].find((g) => g.id === goalId);
+    if (!goal) return;
+
+    setGoalBuckets((prev) => ({
+      ...prev,
+      [sourceBucket]: prev[sourceBucket].filter((g) => g.id !== goalId),
+      [targetBucket]: [...prev[targetBucket], goal],
+    }));
+  };
+
+  // Check if can drop in bucket
+  const canDropInBucket = (bucket: BucketKey): boolean => {
+    if (bucket === "must_have" && goalBuckets.must_have.length >= 3) {
+      return false;
+    }
+    return true;
+  };
+
+  // Remove goal entirely
+  const removeGoal = (goalId: string) => {
+    const bucket = findGoalBucket(goalId);
+    if (bucket) {
+      setGoalBuckets((prev) => ({
+        ...prev,
+        [bucket]: prev[bucket].filter((g) => g.id !== goalId),
+      }));
     }
   };
 
-  const removeGoal = (id: string) => {
-    setGoals(goals.filter((g) => g.id !== id));
+  // Calculate question count preview
+  const calculateQuestionCount = () => {
+    const mustHaveCount = goalBuckets.must_have.length * 4;
+    const interestedCount = goalBuckets.interested.length * 2;
+    return mustHaveCount + interestedCount;
   };
 
   const canProceed = () => {
@@ -251,7 +390,8 @@ export default function NewPanoramaPage() {
       case 1:
         return selectedType !== null;
       case 2:
-        return goals.length > 0;
+        // Need at least one goal in must_have or interested
+        return goalBuckets.must_have.length > 0 || goalBuckets.interested.length > 0;
       case 3:
         return true; // Optional step
       default:
@@ -273,14 +413,6 @@ export default function NewPanoramaPage() {
     }
   };
 
-  const getRecommendedLength = () => {
-    if (!selectedType) return 25;
-    if (selectedType === "plan") return 20;
-    if (selectedType === "pulse") return 10;
-    if (selectedType === "playback") return 25;
-    return 25;
-  };
-
   const handleGenerate = async () => {
     setError(null);
     setLoading(true);
@@ -299,21 +431,25 @@ export default function NewPanoramaPage() {
         return;
       }
 
-      // Prepare context
+      // Prepare context with 3-bucket goals
       const context = {
         user_id: session.user.id,
         event_id: eventId || undefined,
         panorama_type: selectedType || undefined,
         event_type: event.event_type || "Event",
         event_name: event.name,
-        goals: goals.map((g) => g.text),
-        learning_objectives: goals.map((g) => g.text).join(", "), // Use goals as learning objectives
+        // 3-bucket goals
+        goals_must_have: goalBuckets.must_have.map((g) => g.text),
+        goals_interested: goalBuckets.interested.map((g) => g.text),
+        goals_not_important: goalBuckets.not_important.map((g) => g.text),
+        // Other context
+        learning_objectives: [
+          ...goalBuckets.must_have.map((g) => g.text),
+          ...goalBuckets.interested.map((g) => g.text),
+        ].join(", "),
         audience: event.target_market || "Event attendees",
         timing: event.date ? new Date(event.date).toLocaleDateString() : "Event",
-        additional_context: `${highLevelQuestions}\n${lowLevelQuestions}`.trim() || undefined,
-        high_level_questions: highLevelQuestions.trim() || undefined,
-        low_level_questions: lowLevelQuestions.trim() || undefined,
-        survey_length: surveyLength || getRecommendedLength(),
+        additional_context: additionalContext.trim() || undefined,
       };
 
       // Call backend API
@@ -365,6 +501,7 @@ export default function NewPanoramaPage() {
   }
 
   const typeDescription = selectedType ? typeDescriptions[selectedType] : null;
+  const questionCount = calculateQuestionCount();
 
   return (
     <main className="mx-auto max-w-2xl p-6">
@@ -423,24 +560,23 @@ export default function NewPanoramaPage() {
             <div>
               <h2 className="text-lg font-semibold mb-2">Select Panorama Type</h2>
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                Based on your event stage, we recommend a panorama type. You can change this if needed.
+                Choose the type of survey for your event stage.
               </p>
             </div>
             <div className="space-y-3">
               {(["plan", "pulse", "playback"] as PanoramaType[]).map((type) => {
                 const desc = typeDescriptions[type];
-                const isRecommended =
-                  event?.current_stage === "early_planning" && type === "plan" ||
-                  event?.current_stage === "mid_campaign" && type === "pulse" ||
-                  event?.current_stage === "post_event" && type === "playback";
+                const isDisabled = type !== "plan"; // Only "plan" is enabled for MVP
 
                 return (
                   <label
                     key={type}
-                    className={`flex items-start gap-3 p-4 border-2 rounded cursor-pointer ${
-                      selectedType === type
-                        ? "border-black dark:border-white bg-gray-50 dark:bg-gray-900"
-                        : "border-gray-200 dark:border-gray-800"
+                    className={`flex items-start gap-3 p-4 border-2 rounded ${
+                      isDisabled
+                        ? "cursor-not-allowed opacity-50 border-gray-200 dark:border-gray-800"
+                        : selectedType === type
+                        ? "cursor-pointer border-black dark:border-white bg-gray-50 dark:bg-gray-900"
+                        : "cursor-pointer border-gray-200 dark:border-gray-800"
                     }`}
                   >
                     <input
@@ -448,22 +584,23 @@ export default function NewPanoramaPage() {
                       name="panorama_type"
                       value={type}
                       checked={selectedType === type}
-                      onChange={() => setSelectedType(type)}
+                      onChange={() => !isDisabled && setSelectedType(type)}
+                      disabled={isDisabled}
                       className="mt-1"
                     />
                     <div className="flex-1">
                       <div className="font-semibold capitalize mb-1">
                         {desc?.name || type}
-                        {isRecommended && (
-                          <span className="ml-2 text-xs text-blue-600 dark:text-blue-400">
-                            (Recommended)
+                        {isDisabled && (
+                          <span className="ml-2 text-xs text-gray-400 dark:text-gray-500">
+                            (Coming Soon)
                           </span>
                         )}
                       </div>
                       <div className="text-sm text-gray-600 dark:text-gray-400 mb-2">
-                        {desc?.description || ""}
+                        {desc?.description || (isDisabled ? "This survey type will be available in a future update." : "")}
                       </div>
-                      {desc?.outcomes && (
+                      {desc?.outcomes && !isDisabled && (
                         <div className="text-xs text-gray-500 dark:text-gray-500">
                           <strong>Expected outcomes:</strong> {desc.outcomes}
                         </div>
@@ -479,39 +616,79 @@ export default function NewPanoramaPage() {
         {currentStep === 2 && (
           <div className="space-y-4">
             <div>
-              <h2 className="text-lg font-semibold mb-2">Rank Your Goals</h2>
+              <h2 className="text-lg font-semibold mb-2">Prioritize Your Goals</h2>
               {typeDescription && (
                 <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-900 rounded">
                   <p className="text-sm mb-1">
                     <strong>{typeDescription.name} Panorama:</strong> {typeDescription.description}
                   </p>
-                  <p className="text-xs text-gray-600 dark:text-gray-400">
-                    {typeDescription.outcomes}
-                  </p>
                 </div>
               )}
-              <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                Drag to reorder goals by importance. Remove goals that aren't relevant to your event.
+              <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                Drag goals between buckets to set priority. Higher priority = more questions.
               </p>
+
+              {/* Question Count Preview */}
+              <div className="p-3 bg-black dark:bg-white text-white dark:text-black rounded-lg mb-4">
+                <div className="flex justify-between items-center">
+                  <span className="font-medium">Estimated Questions:</span>
+                  <span className="text-xl font-bold">{questionCount}</span>
+                </div>
+                <p className="text-xs opacity-75 mt-1">
+                  Must Have: {goalBuckets.must_have.length} × 4 = {goalBuckets.must_have.length * 4} |
+                  Interested: {goalBuckets.interested.length} × 2 = {goalBuckets.interested.length * 2}
+                </p>
+              </div>
             </div>
+
             {loadingGoals ? (
               <p>Loading goals...</p>
             ) : (
               <DndContext
                 sensors={sensors}
                 collisionDetection={closestCenter}
+                onDragStart={handleDragStart}
                 onDragEnd={handleDragEnd}
               >
-                <SortableContext items={goals.map((g) => g.id)} strategy={verticalListSortingStrategy}>
-                  <div className="space-y-2">
-                    {goals.map((goal, index) => (
-                      <div key={goal.id} className="flex items-center gap-2">
-                        <span className="text-sm text-gray-500 w-6">#{index + 1}</span>
-                        <SortableGoalItem goal={goal} onRemove={removeGoal} />
-                      </div>
-                    ))}
-                  </div>
-                </SortableContext>
+                <div className="space-y-4">
+                  <DroppableBucket
+                    bucketKey="must_have"
+                    title="🎯 Must Have"
+                    description="4 questions per goal (max 3 goals)"
+                    questionsPerGoal={4}
+                    goals={goalBuckets.must_have}
+                    onRemove={removeGoal}
+                    maxReached={goalBuckets.must_have.length >= 3}
+                    isOver={activeBucket !== "must_have" && activeGoal !== null}
+                    canDrop={canDropInBucket("must_have")}
+                  />
+
+                  <DroppableBucket
+                    bucketKey="interested"
+                    title="💡 Interested to Know"
+                    description="2 questions per goal"
+                    questionsPerGoal={2}
+                    goals={goalBuckets.interested}
+                    onRemove={removeGoal}
+                    isOver={activeBucket !== "interested" && activeGoal !== null}
+                    canDrop={canDropInBucket("interested")}
+                  />
+
+                  <DroppableBucket
+                    bucketKey="not_important"
+                    title="⏭️ Not Important"
+                    description="0 questions (skipped)"
+                    questionsPerGoal={0}
+                    goals={goalBuckets.not_important}
+                    onRemove={removeGoal}
+                    isOver={activeBucket !== "not_important" && activeGoal !== null}
+                    canDrop={canDropInBucket("not_important")}
+                  />
+                </div>
+
+                <DragOverlay>
+                  {activeGoal ? <GoalOverlay goal={activeGoal} /> : null}
+                </DragOverlay>
               </DndContext>
             )}
           </div>
@@ -522,55 +699,34 @@ export default function NewPanoramaPage() {
             <div>
               <h2 className="text-lg font-semibold mb-2">Additional Context</h2>
               <p className="text-sm text-gray-600 dark:text-gray-400 mb-4">
-                Share any specific questions or areas you want to cover. We'll use this to generate better survey questions.
+                Share any specific context to help customize your survey questions.
               </p>
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">High-Level Questions/Areas</label>
-              <textarea
-                value={highLevelQuestions}
-                onChange={(e) => setHighLevelQuestions(e.target.value)}
-                className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 outline-none min-h-[100px]"
-                placeholder="e.g., Overall event experience, Lineup satisfaction, Venue quality..."
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-2">Low-Level Questions/Areas</label>
-              <textarea
-                value={lowLevelQuestions}
-                onChange={(e) => setLowLevelQuestions(e.target.value)}
-                className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 outline-none min-h-[100px]"
-                placeholder="e.g., Sound quality, Bar service, Security experience..."
-              />
-            </div>
-            {loadingSuggestions ? (
-              <div className="p-3 bg-gray-50 dark:bg-gray-900 rounded">
-                <p className="text-sm text-gray-600">Loading suggestions...</p>
+
+            {/* Summary */}
+            <div className="p-4 bg-gray-50 dark:bg-gray-900 rounded-lg">
+              <h3 className="font-medium mb-2">Survey Summary</h3>
+              <div className="text-sm space-y-1">
+                <p><strong>Type:</strong> {selectedType?.charAt(0).toUpperCase()}{selectedType?.slice(1)} Survey</p>
+                <p><strong>Estimated Questions:</strong> {questionCount}</p>
+                <p><strong>Must Have Goals:</strong> {goalBuckets.must_have.length > 0 ? goalBuckets.must_have.map(g => g.text).join(", ") : "None"}</p>
+                <p><strong>Interested Goals:</strong> {goalBuckets.interested.length > 0 ? goalBuckets.interested.map(g => g.text).join(", ") : "None"}</p>
               </div>
-            ) : suggestions.length > 0 && (
-              <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded border border-blue-200 dark:border-blue-800">
-                <p className="text-sm font-medium mb-2">Suggestions based on your event:</p>
-                <ul className="text-sm space-y-1 list-disc list-inside">
-                  {suggestions.map((suggestion, index) => (
-                    <li key={index} className="text-gray-700 dark:text-gray-300">
-                      {suggestion}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
+            </div>
+
             <div>
               <label className="block text-sm font-medium mb-2">
-                Survey Length (Recommended: {getRecommendedLength()} questions)
+                Additional Context (Optional)
               </label>
-              <input
-                type="number"
-                value={surveyLength}
-                onChange={(e) => setSurveyLength(parseInt(e.target.value) || getRecommendedLength())}
-                min={5}
-                max={50}
-                className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-2 outline-none"
+              <textarea
+                value={additionalContext}
+                onChange={(e) => setAdditionalContext(e.target.value)}
+                className="w-full rounded-md border border-gray-300 dark:border-gray-700 bg-transparent p-3 outline-none min-h-[120px]"
+                placeholder="e.g., This is a first-time event, we're particularly interested in understanding travel logistics, the venue has limited parking..."
               />
+              <p className="text-xs text-gray-500 mt-1">
+                This helps the AI generate more relevant and specific questions.
+              </p>
             </div>
           </div>
         )}

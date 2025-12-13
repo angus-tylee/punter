@@ -5,6 +5,17 @@ from typing import Dict, List, Optional
 from openai import OpenAI
 from app.config import settings
 from app.services.universal_questions import get_universal_question_texts
+from app.services.question_bank import (
+    get_all_questions,
+    get_required_questions,
+    format_questions_for_prompt,
+)
+from app.services.pre_event_config import (
+    get_bucket_question_counts,
+    get_survey_constraints,
+    format_config_for_prompt,
+    is_forbidden_question,
+)
 
 
 class LLMService:
@@ -92,62 +103,82 @@ class LLMService:
     
     def _analyze_context(self, context: Dict[str, str]) -> Dict:
         """
-        Analyze context to extract user's focus areas/questions from goals and learning_objectives.
-        Uses programmatic analysis (no LLM call).
+        Analyze context to extract goals and prepare data for question generation.
+        Uses 3-bucket goal system.
         """
-        # Extract focus areas from goals and learning_objectives (these are user's actual questions)
-        focus_areas = []
+        # Get goals from buckets
+        must_have_goals = context.get("goals_must_have", [])
+        interested_goals = context.get("goals_interested", [])
         
-        # Process goals (Primary Goals) - these are user's focus areas/questions
-        goals = context.get("goals", "")
-        if isinstance(goals, list):
-            goals = ", ".join(goals)
-        if goals and goals.lower() not in ["none", "not specified", ""]:
-            # Split by common delimiters (commas, semicolons, newlines, bullets)
-            goal_items = re.split(r'[,;]|\n|[-•*]', goals)
-            for item in goal_items:
-                item = item.strip()
-                if item and len(item) > 3:  # Filter out very short items
-                    focus_areas.append(item)
+        # Calculate target question count: 4 per must_have + 2 per interested
+        bucket_counts = get_bucket_question_counts()
+        survey_constraints = get_survey_constraints()
         
-        # Process learning_objectives (What do you want to learn?) - these are also user's focus areas/questions
-        learning_objectives = context.get("learning_objectives", "")
-        if learning_objectives and learning_objectives.lower() not in ["general feedback", "none", "not specified", ""]:
-            # Split by common delimiters
-            obj_items = re.split(r'[,;]|\n|[-•*]', learning_objectives)
-            for item in obj_items:
-                item = item.strip()
-                if item and len(item) > 3:  # Filter out very short items
-                    focus_areas.append(item)
+        target_count = (
+            len(must_have_goals) * bucket_counts["must_have"] +
+            len(interested_goals) * bucket_counts["interested"]
+        )
+        # Ensure within bounds
+        target_count = max(survey_constraints["min_questions"], 
+                         min(target_count, survey_constraints["max_questions"]))
         
-        # Remove duplicates while preserving order
-        seen = set()
-        unique_focus_areas = []
-        for area in focus_areas:
-            area_lower = area.lower()
-            if area_lower not in seen:
-                seen.add(area_lower)
-                unique_focus_areas.append(area)
+        # Load question bank examples and required questions
+        question_bank_examples = get_all_questions()
+        required_questions = get_required_questions()
+        event_name = context.get("event_name", "the event")
         
-        # additional_context is NOT parsed as questions - it's for customization only
+        # Format question bank for prompt
+        question_bank_prompt = format_questions_for_prompt(question_bank_examples, event_name)
+        
+        # Format required questions for prompt
+        required_questions_prompt = format_questions_for_prompt(required_questions, event_name)
+        
+        # Get pre-event rules for prompt
+        pre_event_rules = format_config_for_prompt()
+        
+        # additional_context is for customization only
         additional_context = context.get("additional_context", "")
         
         return {
-            "focus_areas": unique_focus_areas,
             "additional_context": additional_context,
             "event_type": context.get("event_type", ""),
-            "event_name": context.get("event_name", ""),
+            "event_name": event_name,
             "audience": context.get("audience", ""),
-            "timing": context.get("timing", "")
+            "timing": context.get("timing", ""),
+            # Bucket goals
+            "must_have_goals": must_have_goals,
+            "interested_goals": interested_goals,
+            "target_question_count": target_count,
+            # Question bank data
+            "question_bank_prompt": question_bank_prompt,
+            "required_questions_prompt": required_questions_prompt,
+            "required_questions": required_questions,
+            # Pre-event rules
+            "pre_event_rules": pre_event_rules,
         }
     
     def _build_prompt(self, context: Dict[str, str], context_analysis: Dict) -> str:
-        """Build the prompt for question expansion approach"""
-        # Format user's focus areas
-        focus_areas = context_analysis.get("focus_areas", [])
-        if not focus_areas:
-            focus_areas = ["General event feedback"]
-        focus_areas_text = "\n".join([f"- {area}" for area in focus_areas])
+        """Build the prompt for question generation using 3-bucket goal system"""
+        # Format goals by bucket with question counts
+        must_have = context_analysis.get("must_have_goals", [])
+        interested = context_analysis.get("interested_goals", [])
+        
+        focus_areas_text = "GOAL PRIORITIES (generate questions accordingly):\n\n"
+        
+        if must_have:
+            focus_areas_text += "MUST HAVE (4 questions per goal):\n"
+            for goal in must_have:
+                focus_areas_text += f"  - {goal}\n"
+        
+        if interested:
+            focus_areas_text += "\nINTERESTED TO KNOW (2 questions per goal):\n"
+            for goal in interested:
+                focus_areas_text += f"  - {goal}\n"
+        
+        if not must_have and not interested:
+            focus_areas_text += "No specific goals provided - generate general pre-event survey questions.\n"
+        
+        focus_areas_text += f"\nTARGET TOTAL: {context_analysis.get('target_question_count', 15)} questions"
         
         # Format the template with context variables
         prompt = self._question_prompt_template.format(
@@ -159,9 +190,26 @@ class LLMService:
             additional_context=context_analysis.get('additional_context', 'None')
         )
         
-        # Dynamically append universal questions list
+        # Add pre-event rules (forbidden patterns, constraints)
+        pre_event_rules = context_analysis.get("pre_event_rules", "")
+        if pre_event_rules:
+            prompt += f"\n\n{pre_event_rules}"
+        
+        # Add question bank examples as inspiration
+        question_bank_prompt = context_analysis.get("question_bank_prompt", "")
+        if question_bank_prompt:
+            prompt += "\n\nQUESTION BANK (use these as inspiration, adapt and personalize for the event):\n"
+            prompt += question_bank_prompt
+        
+        # Add required questions that MUST be included
+        required_questions_prompt = context_analysis.get("required_questions_prompt", "")
+        if required_questions_prompt:
+            prompt += "\n\nREQUIRED QUESTIONS (must include these in every survey):\n"
+            prompt += required_questions_prompt
+        
+        # Dynamically append universal questions list (demographics - already collected)
         universal_question_texts = get_universal_question_texts()
-        prompt += "\n\nThe following questions are automatically included in every survey. Do not create questions similar to these:\n"
+        prompt += "\n\nThe following DEMOGRAPHIC questions are automatically included. Do NOT create questions similar to these:\n"
         for i, q_text in enumerate(universal_question_texts, 1):
             prompt += f"{i}. {q_text}\n"
         
@@ -210,13 +258,25 @@ class LLMService:
             # Format questions for validation prompt (can be sections structure or flat list)
             questions_json = json.dumps(questions_data, indent=2)
             
-            # Format user focus areas
-            focus_areas = context_analysis.get("focus_areas", [])
-            focus_areas_text = "\n".join([f"- {area}" for area in focus_areas]) if focus_areas else "- General event feedback"
+            # Format goals by bucket for validation
+            must_have = context_analysis.get("must_have_goals", [])
+            interested = context_analysis.get("interested_goals", [])
+            
+            goals_text = ""
+            if must_have:
+                goals_text += "MUST HAVE (need 4 questions each):\n"
+                for goal in must_have:
+                    goals_text += f"  - {goal}\n"
+            if interested:
+                goals_text += "INTERESTED TO KNOW (need 2 questions each):\n"
+                for goal in interested:
+                    goals_text += f"  - {goal}\n"
+            if not goals_text:
+                goals_text = "- General pre-event survey"
             
             # Build validation prompt
             validation_prompt = self._validation_prompt_template.format(
-                user_focus_areas=focus_areas_text,
+                user_focus_areas=goals_text,
                 generated_questions=questions_json
             )
             
@@ -253,9 +313,21 @@ class LLMService:
             questions_json = json.dumps(questions_data, indent=2)
             validation_json = json.dumps(validation_result, indent=2)
             
-            # Format user focus areas
-            focus_areas = context_analysis.get("focus_areas", [])
-            focus_areas_text = "\n".join([f"- {area}" for area in focus_areas]) if focus_areas else "- General event feedback"
+            # Format goals by bucket for refinement
+            must_have = context_analysis.get("must_have_goals", [])
+            interested = context_analysis.get("interested_goals", [])
+            
+            goals_text = ""
+            if must_have:
+                goals_text += "MUST HAVE (need 4 questions each):\n"
+                for goal in must_have:
+                    goals_text += f"  - {goal}\n"
+            if interested:
+                goals_text += "INTERESTED TO KNOW (need 2 questions each):\n"
+                for goal in interested:
+                    goals_text += f"  - {goal}\n"
+            if not goals_text:
+                goals_text = "- General pre-event survey"
             
             # Get refinement instructions from validation result
             refinement_instructions = validation_result.get("refinement_instructions", "Fix any issues identified in the validation feedback.")
@@ -265,7 +337,7 @@ class LLMService:
                 original_questions=questions_json,
                 validation_feedback=validation_json,
                 refinement_instructions=refinement_instructions,
-                context_topics=focus_areas_text
+                context_topics=goals_text
             )
             
             response = self.client.chat.completions.create(
@@ -353,7 +425,7 @@ class LLMService:
         return {"sections": []}
     
     def _validate_questions(self, questions: List[Dict]) -> List[Dict]:
-        """Validate and normalize question structure, and filter out demographic questions"""
+        """Validate and normalize question structure, filter demographics and forbidden patterns"""
         valid_types = ["text", "textarea", "Single-select", "Multi-select", "Likert"]
         validated = []
         
@@ -388,6 +460,11 @@ class LLMService:
                 print(f"Warning: Removed demographic question (keyword match): {question_text}")
                 continue
             
+            # Check for forbidden patterns (post-event questions in pre-event survey)
+            if is_forbidden_question(question_text):
+                print(f"Warning: Removed forbidden question (pre-event rule): {question_text}")
+                continue
+            
             question_type = q.get("question_type", "text")
             if question_type not in valid_types:
                 question_type = "text"
@@ -418,191 +495,127 @@ class LLMService:
         return validated
     
     def _get_fallback_questions(self, context: Dict[str, str]) -> List[Dict]:
-        """Return comprehensive 25-question fallback if LLM fails"""
+        """Return pre-event appropriate fallback questions if LLM fails"""
         event_name = context.get("event_name", "this event")
         likert_scale = ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"]
         
-        return [
-            # Event Experience (4-5 questions)
+        # Get required questions from question bank
+        required_questions = get_required_questions()
+        fallback = []
+        
+        # Add required questions first
+        for i, rq in enumerate(required_questions):
+            q_text = rq.get("question_text_template", "").format(event_name=event_name)
+            fallback.append({
+                "question_text": q_text,
+                "question_type": rq.get("question_type", "textarea"),
+                "options": rq.get("options"),
+                "required": True,
+                "order": i
+            })
+        
+        start_order = len(fallback)
+        
+        # Pre-event appropriate fallback questions
+        pre_event_fallback = [
+            # Expectations (3 questions)
             {
-                "question_text": f"How would you rate the overall energy and atmosphere of {event_name}?",
+                "question_text": f"What are you most looking forward to at {event_name}?",
+                "question_type": "Multi-select",
+                "options": ["Music performances", "Meeting new people", "Food & drinks", "Overall atmosphere", "Discovering new artists", "Dancing"],
+                "required": True,
+                "order": start_order
+            },
+            {
+                "question_text": f"How excited are you about attending {event_name}?",
                 "question_type": "Likert",
                 "options": likert_scale,
                 "required": True,
-                "order": 0
+                "order": start_order + 1
             },
             {
-                "question_text": f"Did {event_name} meet your expectations?",
-                "question_type": "Likert",
-                "options": likert_scale,
-                "required": True,
-                "order": 1
-            },
-            {
-                "question_text": "How would you rate the overall event experience?",
-                "question_type": "Single-select",
-                "options": ["Excellent", "Very Good", "Good", "Fair", "Poor"],
-                "required": True,
-                "order": 2
-            },
-            {
-                "question_text": "What was the highlight of your experience?",
+                "question_text": f"What would make {event_name} a success for you?",
                 "question_type": "textarea",
                 "options": None,
                 "required": False,
-                "order": 3
+                "order": start_order + 2
             },
+            # Preferences (3 questions)
             {
-                "question_text": "How would you describe the overall event flow and pacing?",
-                "question_type": "Likert",
-                "options": likert_scale,
-                "required": False,
-                "order": 4
-            },
-            # Music Lineup & Atmosphere (4-5 questions)
-            {
-                "question_text": "How would you rate the sound quality across different stages?",
-                "question_type": "Likert",
-                "options": likert_scale,
-                "required": True,
-                "order": 5
-            },
-            {
-                "question_text": "How satisfied were you with the diversity of artists and genres?",
-                "question_type": "Likert",
-                "options": likert_scale,
-                "required": True,
-                "order": 6
-            },
-            {
-                "question_text": "Which aspects of the music lineup did you enjoy most?",
+                "question_text": "What music genres are you most interested in?",
                 "question_type": "Multi-select",
-                "options": ["Headliner performances", "Supporting acts", "Genre diversity", "Stage production", "Sound quality", "Artist discovery"],
-                "required": False,
-                "order": 7
-            },
-            {
-                "question_text": "How would you rate the stage setup and visual production?",
-                "question_type": "Likert",
-                "options": likert_scale,
-                "required": False,
-                "order": 8
-            },
-            {
-                "question_text": "Were there any scheduling conflicts that affected your experience?",
-                "question_type": "text",
-                "options": None,
-                "required": False,
-                "order": 9
-            },
-            # Venue Logistics (4-5 questions)
-            {
-                "question_text": "How accessible was the venue for people with mobility needs?",
-                "question_type": "Likert",
-                "options": likert_scale,
-                "required": False,
-                "order": 10
-            },
-            {
-                "question_text": "How would you rate the cleanliness and maintenance of facilities?",
-                "question_type": "Likert",
-                "options": likert_scale,
+                "options": ["Electronic/Dance", "Hip-Hop/R&B", "Rock/Alternative", "Pop", "Indie", "House/Techno", "Other"],
                 "required": True,
-                "order": 11
+                "order": start_order + 3
             },
             {
-                "question_text": "How would you rate the entry and exit process?",
+                "question_text": "What time of day do you prefer to attend events?",
                 "question_type": "Single-select",
-                "options": ["Very Smooth", "Smooth", "Average", "Difficult", "Very Difficult"],
+                "options": ["Morning", "Afternoon", "Evening", "Late Night", "No preference"],
                 "required": False,
-                "order": 12
+                "order": start_order + 4
             },
             {
-                "question_text": "Which amenities were most important to your experience?",
-                "question_type": "Multi-select",
-                "options": ["Food & Beverage", "Restrooms", "First Aid", "Water stations", "Charging stations", "Seating areas"],
-                "required": False,
-                "order": 13
-            },
-            {
-                "question_text": "How safe did you feel throughout the event?",
-                "question_type": "Likert",
-                "options": likert_scale,
-                "required": True,
-                "order": 14
-            },
-            # Communication & Marketing (3-4 questions)
-            {
-                "question_text": "How clear and helpful was the pre-event communication?",
-                "question_type": "Likert",
-                "options": likert_scale,
-                "required": True,
-                "order": 15
-            },
-            {
-                "question_text": "Did you find the event schedule easy to access and understand?",
+                "question_text": "How important is the food and beverage selection to your experience?",
                 "question_type": "Likert",
                 "options": likert_scale,
                 "required": False,
-                "order": 16
+                "order": start_order + 5
             },
+            # Logistics (3 questions)
             {
-                "question_text": "How would you rate the event's social media presence and updates?",
-                "question_type": "Likert",
-                "options": likert_scale,
-                "required": False,
-                "order": 17
-            },
-            {
-                "question_text": "What information would have been helpful to know before the event?",
-                "question_type": "textarea",
-                "options": None,
-                "required": False,
-                "order": 18
-            },
-            # Sustainability & Inclusivity (3-4 questions)
-            {
-                "question_text": "How would you rate the event's commitment to sustainability?",
-                "question_type": "Likert",
-                "options": likert_scale,
-                "required": False,
-                "order": 19
-            },
-            {
-                "question_text": "Did you feel the event was inclusive and welcoming to all attendees?",
-                "question_type": "Likert",
-                "options": likert_scale,
-                "required": True,
-                "order": 20
-            },
-            {
-                "question_text": "Which sustainability practices did you notice?",
-                "question_type": "Multi-select",
-                "options": ["Recycling programs", "Compostable materials", "Water refill stations", "Public transport options", "Carbon offset initiatives", "None"],
-                "required": False,
-                "order": 21
-            },
-            {
-                "question_text": "How would you rate the event's diversity and representation?",
-                "question_type": "Likert",
-                "options": likert_scale,
-                "required": False,
-                "order": 22
-            },
-            # Post-Event Engagement (2-3 questions)
-            {
-                "question_text": f"How likely are you to attend future events by this organizer?",
-                "question_type": "Likert",
-                "options": likert_scale,
-                "required": True,
-                "order": 23
-            },
-            {
-                "question_text": "Would you share your experience on social media?",
+                "question_text": f"How are you planning to get to {event_name}?",
                 "question_type": "Single-select",
-                "options": ["Definitely", "Probably", "Maybe", "Probably Not", "Definitely Not"],
+                "options": ["Driving myself", "Rideshare (Uber/Lyft)", "Public transport", "Walking/Cycling", "Getting dropped off", "Not sure yet"],
+                "required": True,
+                "order": start_order + 6
+            },
+            {
+                "question_text": "What information would be most helpful to receive before the event?",
+                "question_type": "Multi-select",
+                "options": ["Lineup schedule", "Venue map", "Parking details", "Entry procedures", "Food options", "Weather updates"],
                 "required": False,
-                "order": 24
-            }
+                "order": start_order + 7
+            },
+            {
+                "question_text": "Will you be attending alone or with others?",
+                "question_type": "Single-select",
+                "options": ["Alone", "With 1 other person", "With a small group (3-5)", "With a large group (6+)"],
+                "required": False,
+                "order": start_order + 8
+            },
+            # Marketing (2 questions)
+            {
+                "question_text": f"How did you hear about {event_name}?",
+                "question_type": "Single-select",
+                "options": ["Social media", "Friend/Word of mouth", "Email newsletter", "Online ads", "Event listing sites", "Other"],
+                "required": True,
+                "order": start_order + 9
+            },
+            {
+                "question_text": "What made you decide to attend?",
+                "question_type": "Multi-select",
+                "options": ["The lineup", "Price/value", "Venue location", "Friend recommendation", "Past experience with organizer", "FOMO"],
+                "required": False,
+                "order": start_order + 10
+            },
+            # Pricing (2 questions)
+            {
+                "question_text": "How would you rate the ticket price compared to similar events?",
+                "question_type": "Single-select",
+                "options": ["Much better value", "Slightly better value", "About the same", "Slightly more expensive", "Much more expensive"],
+                "required": False,
+                "order": start_order + 11
+            },
+            {
+                "question_text": "What ticket type did you purchase?",
+                "question_type": "Single-select",
+                "options": ["General Admission", "VIP", "Early Bird", "Group Package", "Other"],
+                "required": False,
+                "order": start_order + 12
+            },
         ]
+        
+        fallback.extend(pre_event_fallback)
+        return fallback
 

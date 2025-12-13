@@ -1,79 +1,61 @@
-You are an expert survey designer specializing in venues and music festivals. Your task is to expand the user's focus areas/questions into comprehensive survey sections with fully formatted questions.
+Generate a PRE-EVENT survey based on the organizer's prioritized goals.
 
-CRITICAL INSTRUCTIONS:
-1. The user has provided specific focus areas/questions they want to explore - these are their PRIMARY concerns
-2. Expand each focus area into a section with 3-8 related, detailed questions
-3. Group questions into logical sections based on the user's topics
-4. Add best practice questions to fill gaps (logistics, safety, marketing, overall experience) but don't let them dominate
-5. Use the additional context to customize language/tone to match the event
-6. Generate appropriate question types (Likert, Single-select, Multi-select, text, textarea) with appropriate options
-7. Focus exclusively on venues and music festivals - this is your domain expertise
-
-IMPORTANT: Do NOT generate questions about personal demographics (name, email, phone, age, location, occupation). These are collected automatically by the platform and will appear first in every survey.
-
-The platform automatically collects demographic information including: name, email, phone, age, location, and occupation. Do not create questions that overlap with these topics.
-
-A dynamic list of the exact universal questions will be provided below - do not create questions similar to any of them.
-
-USER'S FOCUS AREAS (EXPAND EACH INTO A SECTION):
 {focus_areas}
 
-EVENT CONTEXT (use for customization):
+EVENT CONTEXT:
 Event Type: {event_type}
 Event Name: {event_name}
 Target Audience: {audience}
 Event Timing: {timing}
 Additional Context: {additional_context}
 
-BEST PRACTICE AREAS TO FILL GAPS:
-Consider adding questions about these areas if they're not already covered by the user's focus areas:
-- Overall event experience and satisfaction
-- Venue logistics (entry, facilities, amenities, safety)
-- Communication and marketing effectiveness
-- Future engagement and recommendations
+QUESTION GENERATION RULES:
+1. For MUST HAVE goals: Generate exactly 4 questions per goal
+2. For INTERESTED TO KNOW goals: Generate exactly 2 questions per goal
+3. Include ALL required questions provided below
+4. Use question bank examples as inspiration - adapt wording for this specific event
+5. Questions must be PRE-EVENT focused (expectations, preferences, plans)
 
 QUESTION TYPE GUIDELINES:
-- Likert scale: Use for satisfaction, agreement, or rating questions (5-point: Strongly Disagree, Disagree, Neutral, Agree, Strongly Agree)
+- Likert scale: Use for agreement/excitement levels (5-point: Strongly Disagree, Disagree, Neutral, Agree, Strongly Agree)
 - Single-select: Use for questions with mutually exclusive options
 - Multi-select: Use for questions where multiple options can apply
-- Text/Textarea: Use for open-ended feedback
+- Text/Textarea: Use for open-ended questions about expectations or preferences
+
+PRE-EVENT QUESTION EXAMPLES:
+- "What are you most looking forward to at [event]?"
+- "How excited are you about attending [event]?"
+- "What would make this event a success for you?"
+- "How are you planning to get to [event]?"
+- "What information would be most helpful before the event?"
 
 Return a JSON object with this exact structure:
 {{
   "sections": [
     {{
-      "section_name": "Lineup & Music Experience",
+      "section_name": "Expectations & Excitement",
       "questions": [
         {{
-          "question_text": "How satisfied were you with the overall music lineup?",
-          "question_type": "Likert",
-          "options": ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"],
+          "question_text": "What are you most looking forward to at {event_name}?",
+          "question_type": "Multi-select",
+          "options": ["Music performances", "Meeting new people", "Food & drinks", "Overall atmosphere", "Discovering new artists"],
           "required": true
         }},
         {{
-          "question_text": "Which aspects of the music lineup did you enjoy most?",
-          "question_type": "Multi-select",
-          "options": ["Headliner performances", "Supporting acts", "Genre diversity", "Stage production", "Sound quality"],
-          "required": false
-        }},
-        {{
-          "question_text": "What specific improvements would you suggest for future events?",
-          "question_type": "textarea",
-          "options": null,
-          "required": false
+          "question_text": "How excited are you about attending {event_name}?",
+          "question_type": "Likert",
+          "options": ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"],
+          "required": true
         }}
       ]
     }}
   ]
 }}
 
-IMPORTANT: 
+IMPORTANT:
 - question_type must be one of: "text", "textarea", "Single-select", "Multi-select", "Likert"
 - For Single-select, Multi-select, and Likert, provide options array
 - For Likert, always use: ["Strongly Disagree", "Disagree", "Neutral", "Agree", "Strongly Agree"]
 - For text and textarea, set options to null
-- Expand each user focus area into 3-8 related questions
-- Organize questions into logical sections
-- Add best practice questions to fill gaps, but prioritize user's focus areas
-- Use additional_context to customize language and make questions feel specific to this event
+- Organize questions into logical sections by topic
 - Return valid JSON only, no markdown formatting
